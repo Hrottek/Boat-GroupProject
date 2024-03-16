@@ -2,8 +2,7 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 
-RF24 radio(9, 10); // CE, CSN pins configuration
-const byte addresses[][6] = {"1Node", "2Node"};
+
 
 struct SensorData {
   int16_t xAxis;
@@ -21,6 +20,13 @@ bool isSending = true; // Start in sending mode
 unsigned long lastSwitchTime = 0; // Last time we switched mode
 const unsigned long sendingDuration = 1000; // Send data for 1 second
 bool awaitingData = false; // Flag to indicate awaiting reception of one data packet
+
+//pins for NRF24L01
+const int pinCE = 9;
+const int pinCSN = 10;
+
+RF24 radio(pinCE, pinCSN); // CE, CSN pins configuration
+const byte addresses[][6] = {"1Node", "2Node"};
 
 void setup() {
   Serial.begin(9600);

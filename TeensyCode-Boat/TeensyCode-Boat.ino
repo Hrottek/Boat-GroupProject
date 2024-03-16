@@ -2,9 +2,7 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 
-RF24 radio(19, 10); // Adjust pin numbers for CE, CSN to match your Teensy setup
 
-const byte addresses[][6] = {"1Node", "2Node"};
 
 struct SensorData {
   int16_t xAxis;
@@ -35,8 +33,15 @@ const int pinPwmDriveLeft = 2; // PWM control for left drive
 const int pinPwmDriveRight = 3; // PWM control for right drive
 const int pinPwmDumpLeft = 4; // PWM control for left dump
 const int pinPwmDumpRight = 5; // PWM control for right dump
-const int pwmValueDumpLeft = 128;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle)
+const int pwmValueDumpLeft = 128;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle) //TODO zistit
 const int pwmValueDumpRight = 128;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle)
+
+//pins for NRF24L01
+const int pinCE = 19;
+const int pinCSN = 10;
+RF24 radio(pinCE, pinCSN); // Adjust pin numbers for CE, CSN to match your Teensy setup
+const byte addresses[][6] = {"1Node", "2Node"};
+
 
 void setup() {
   Serial.begin(9600);
@@ -81,29 +86,14 @@ void loop() {
       triggerFunctionsNonBlockingRightDump();
     }
 
+    drive();
+
     sendDataToArduino();
   }
   else{
     //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
   }
   delay(1);
-    
-    // Act upon the received data
-    // handleDrive(dataToReceive.pwmL, dataToReceive.pwmR);
-    // handleDump(dataToReceive.leftDump, pinDumpLeftDirection1, pinDumpLeftDirection2, pinPwmDumpLeft);
-    // handleDump(dataToReceive.rightDump, pinDumpRightDirection1, pinDumpRightDirection2, pinPwmDumpRight);
-
-    // Send a response back to the Arduino
-    
-  
-
-  
-}
-
-void handleDrive(int16_t pwmL, int16_t pwmR) {  //TODO MATO A DAVID
-  // Assuming PWM values directly control speed and direction is handled elsewhere
-  analogWrite(pinPwmDriveLeft, pwmL);
-  analogWrite(pinPwmDriveRight, pwmR);
 }
 
 void triggerFunctionsNonBlockingLeftDump() {
@@ -145,9 +135,14 @@ void triggerFunctionsNonBlockingRightDump() {
 }
 void sendDataToArduino() {
   radio.stopListening();
-  dataToSend.leftDump = 5; // Prepare your data
+  dataToSend.leftDump = 5; // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
   while(radio.write(&dataToSend, sizeof(SensorData))){
-
+    //Keep sending until you acnowledge 
+    //TODO after 15 sec return home
   }
   radio.startListening();
+}
+
+void drive(){
+  
 }
