@@ -2,6 +2,30 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 
+// 16/3/2024
+
+#define deadZone 20
+#define speedZone 20
+
+#define slowSpeed 200 // PWM
+#define fastSpeed 255
+
+typedef struct {
+    int x;
+    int y;
+} MiddlePoint;
+
+typedef enum {
+    N,
+    NW,
+    NE,
+    E,
+    W,
+    SW,
+    SE,
+    S,
+    None
+} Direction; //svetove strany
 
 
 struct SensorData {
@@ -65,6 +89,7 @@ void setup() {
   pinMode(pinPwmDriveRight, OUTPUT);
   pinMode(pinPwmDumpLeft, OUTPUT);
   pinMode(pinPwmDumpRight, OUTPUT);
+
 }
 
 void loop() {
@@ -86,7 +111,7 @@ void loop() {
       triggerFunctionsNonBlockingRightDump();
     }
 
-    drive();
+    drive(dataToReceive.xAxis,dataToReceive.yAxis);
 
     sendDataToArduino();
   }
@@ -143,12 +168,154 @@ void sendDataToArduino() {
   radio.startListening();
 }
 
-void drive(){
-  digitalWrite(pinDriveLeftDirection1, HIGH);
-  digitalWrite(pinDriveLeftDirection2, LOW);
-  analogWrite(pinPwmDriveLeft, 255);
+void drive(int xData, int yData){
+    setMiddlePoint(500, 500);
+    Direction direction = setMovement(xData, yData);
+    Serial.println(direction);
+    int speed = setSpeed(xData);
+    static int speedR;
+    static int speedL;
+    int motorPinAR=1;
+    int motorPinBR=0;
+    int motorPinAL=1;
+    int motorPinBL=0;
+    switch (direction) {
+        case N:
+            speedL=speed;
+            speedR=speed;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=1;
+            motorPinBL=0;
+            break;
+        case S:
+            speedL=speed;
+            speedR=speed;
+            motorPinAR=0;
+            motorPinBR=1;
+            motorPinAL=0;
+            motorPinBL=1;
 
-  digitalWrite(pinDriveRightDirection1, HIGH);
-  digitalWrite(pinDriveRightDirection2, LOW);
-  analogWrite(pinPwmDriveRight, 255);
+            break;
+        case E:
+            speedL=speed;
+            speedR=0;
+            motorPinAR=0;
+            motorPinBR=1;
+            motorPinAL=1;
+            motorPinBL=0;
+
+            break;
+        case W:
+            speedL=0;
+            speedR=speed;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+
+            break;
+        case NW:
+            speedL=speed/1.5;
+            speedR=speed;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+            break;
+        case SW:
+            speedL=speed/1.5;
+            speedR=speed;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+            break;
+        case NE:
+            speedL=speed;
+            speedR=speed/1.5;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+            break;
+        case SE:
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+            speedL=speed;
+            speedR=speed/1.5;
+            break;
+        default:
+            speedL=0;
+            speedR=0;
+            motorPinAR=1;
+            motorPinBR=0;
+            motorPinAL=0;
+            motorPinBL=1;
+            break;
+    }
+    digitalWrite(pinDriveRightDirection1, motorPinAR);
+    digitalWrite(pinDriveRightDirection2, motorPinBR);
+    digitalWrite(pinDriveLeftDirection1, motorPinAL);
+    digitalWrite(pinDriveLeftDirection2, motorPinBL);
+    analogWrite(pinPwmDriveLeft, speedL);
+    analogWrite(pinPwmDriveRight, speedR);
 }
+
+MiddlePoint setMiddlePoint(int startMiddleX, int startMiddleY) {
+    MiddlePoint central;
+    central.x = startMiddleX;
+    central.y = startMiddleY;
+    Serial.println(central.y);
+
+    return central;
+}
+
+Direction setMovement(int xData, int yData) {
+    MiddlePoint central = setMiddlePoint(0, 0); //random cisla tie nuly
+
+    const int deadZoneLowX = 500 - deadZone;
+    const int deadZoneHighX = 500 + deadZone;
+
+    const int deadZoneLowY = 500 - deadZone;
+    const int deadZoneHighY = 500 + deadZone;
+
+    Serial.println(central.y);
+    if (xData > deadZoneHighX && yData > deadZoneHighY)
+        return NE;
+
+    else if (xData < deadZoneLowX && yData > deadZoneHighY)
+        return NW;
+
+    else if (xData < deadZoneHighX && xData > deadZoneLowX && yData > deadZoneHighY)
+        return N;
+
+    else if (xData < deadZoneHighX && xData > deadZoneLowX && yData < deadZoneLowY)
+        return S;
+
+    else if (xData > deadZoneHighX && yData < deadZoneHighY && yData > deadZoneLowY)
+        return E;
+
+    else if (xData < deadZoneLowX && yData < deadZoneHighY && yData > deadZoneLowY)
+        return W;
+
+    else if (xData > deadZoneHighX && yData < deadZoneLowY)
+        return SE;
+
+    else if (xData < deadZoneLowX && yData < deadZoneLowY)
+        return SW;
+    else
+      return None;
+
+}
+
+int setSpeed(int joystick) {  //joystick - hodnota kt. budeme ziskavat z joysticku
+    if (joystick < speedZone) //speedzone - hranica na kt. sa bude menit rychlost, treba odmerat
+        return slowSpeed;
+    else
+        return fastSpeed;
+}
+
+
