@@ -144,5 +144,11 @@ void sendDataToArduino() {
 }
 
 void drive(){
-  
+  digitalWrite(pinDriveLeftDirection1, HIGH);
+  digitalWrite(pinDriveLeftDirection2, LOW);
+  analogWrite(pinPwmDriveLeft, 255);
+
+  digitalWrite(pinDriveRightDirection1, HIGH);
+  digitalWrite(pinDriveRightDirection2, LOW);
+  analogWrite(pinPwmDriveRight, 255);
 }
