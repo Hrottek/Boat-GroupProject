@@ -4,11 +4,21 @@
 
 
 
-struct SensorData {
+struct commandData {
   int16_t xAxis;
   int16_t yAxis;
   int16_t leftDump;
   int16_t rightDump;
+  double gpsGoToPosLat;
+  double gpsGoToPosLon; //Ak su 0 tak nechod ak sa zmenia tak chod
+  bool returnHome; //return Home if needed
+};
+
+struct SensorData{
+  int16_t sonarDistance;
+  int16_t sonarFIshFoundNum;
+  double actualGpsPositionLon;
+  double actualGpsPositionLat;
 };
 
 const int pinDriveYAxis = A0;
@@ -56,7 +66,7 @@ void loop() {
 
   if (isSending) {
     // Create some data to send
-    SensorData dataToSend;
+    commandData dataToSend;
     dataToSend.yAxis = analogRead(pinDriveYAxis);
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
@@ -75,7 +85,11 @@ void loop() {
       awaitingData = false; // Reset flag after receiving data
       isSending = true; // Switch back to sending mode
       lastSwitchTime = millis(); // Update the switch time
-      Serial.println(dataReceived.leftDump);
+      Serial.println(dataReceived.actualGpsPositionLat);
+    }
+
+    else{
+      //TODO Not connected to the boat
     }
   }
 }

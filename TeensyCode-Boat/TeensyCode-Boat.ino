@@ -28,14 +28,25 @@ typedef enum {
 } Direction; //svetove strany
 
 
-struct SensorData {
+struct commandData {
   int16_t xAxis;
   int16_t yAxis;
   int16_t leftDump;
   int16_t rightDump;
+  double gpsGoToPosLat;
+  double gpsGoToPosLon; //Ak su 0 tak nechod ak sa zmenia tak chod
+  bool returnHome; //return Home if needed
 };
 
-SensorData dataToSend = {0, 0, 0, 0}, dataToReceive;
+struct SensorData{
+  int16_t sonarDistance;
+  int16_t sonarFIshFoundNum;
+  double actualGpsPositionLon;
+  double actualGpsPositionLat;
+};
+
+SensorData dataToSend;
+commandData dataToReceive;
 
 unsigned long previousMillisLeft = 0; // Stores last time the functions were triggered
 const long intervalLeft = 1000; // Interval at which to run the second function (milliseconds)
@@ -94,7 +105,7 @@ void setup() {
 
 void loop() {
   if (radio.available()) {
-    radio.read(&dataToReceive, sizeof(SensorData));
+    radio.read(&dataToReceive, sizeof(commandData));
     Serial.print(dataToReceive.yAxis);
     Serial.print("  ");
     Serial.print(dataToReceive.xAxis);
@@ -160,7 +171,7 @@ void triggerFunctionsNonBlockingRightDump() {
 }
 void sendDataToArduino() {
   radio.stopListening();
-  dataToSend.leftDump = 5; // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
+  dataToSend.sonarDistance = 5; // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
   while(radio.write(&dataToSend, sizeof(SensorData))){
     //Keep sending until you acnowledge 
     //TODO after 15 sec return home
