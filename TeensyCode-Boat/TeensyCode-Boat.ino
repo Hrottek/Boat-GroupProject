@@ -104,6 +104,7 @@ void setup() {
 }
 
 void loop() {
+  //sendDataToArduino();
   if (radio.available()) {
     radio.read(&dataToReceive, sizeof(commandData));
     Serial.print(dataToReceive.yAxis);
@@ -124,12 +125,14 @@ void loop() {
 
     drive(dataToReceive.xAxis,dataToReceive.yAxis);
 
-    sendDataToArduino();
+    
   }
+  
   else{
     //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
   }
-  delay(1);
+  sendDataToArduino();
+  delay(10);
 }
 
 void triggerFunctionsNonBlockingLeftDump() {
@@ -170,19 +173,21 @@ void triggerFunctionsNonBlockingRightDump() {
   }
 }
 void sendDataToArduino() {
+  
   radio.stopListening();
   dataToSend.sonarDistance = 5; // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
   while(radio.write(&dataToSend, sizeof(SensorData))){
     //Keep sending until you acnowledge 
     //TODO after 15 sec return home
   }
+ 
   radio.startListening();
 }
 
 void drive(int xData, int yData){
     setMiddlePoint(500, 500);
     Direction direction = setMovement(xData, yData);
-    Serial.println(direction);
+    //Serial.println(direction);
     int speed = setSpeed(xData);
     static int speedR;
     static int speedL;
@@ -279,7 +284,7 @@ MiddlePoint setMiddlePoint(int startMiddleX, int startMiddleY) {
     MiddlePoint central;
     central.x = startMiddleX;
     central.y = startMiddleY;
-    Serial.println(central.y);
+   // Serial.println(central.y);
 
     return central;
 }
@@ -293,7 +298,7 @@ Direction setMovement(int xData, int yData) {
     const int deadZoneLowY = 500 - deadZone;
     const int deadZoneHighY = 500 + deadZone;
 
-    Serial.println(central.y);
+    //Serial.println(central.y);
     if (xData > deadZoneHighX && yData > deadZoneHighY)
         return NE;
 
