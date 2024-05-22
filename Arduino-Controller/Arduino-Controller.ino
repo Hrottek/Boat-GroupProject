@@ -78,6 +78,7 @@ struct SensorData{
   int16_t sonarFIshFoundNum;
   double actualGpsPositionLon;
   double actualGpsPositionLat;
+  int16_t NumOfSats;
 };
 
 SensorData dataReceived;
@@ -90,8 +91,6 @@ const int pinDumpRight = A3; //normally 8
 
 bool firstInitTime = false;
 
-
-bool SPICOM = true;
 bool isSending = true; // Start in sending mode
 unsigned long lastSwitchTime = 0; // Last time we switched mode
 const unsigned long sendingDuration = 1000; // Send data for 1 second
@@ -134,18 +133,15 @@ void loop() {
   if(!firstInitTime){
     lastSwitchTime = millis();
     firstInitTime = true;
-  }
-  
-
-
-
+  }    
 
   digitalWrite(pinCSN, LOW);
+  SPI.endTransaction();
   //digitalWrite(TFT_CS, LOW);
-  SPICOM = true;
   //SPI.beginTransaction(settingsDevice1);
 
   unsigned long currentTime = millis();
+  bool radioAvailable = true;  
 
   if (isSending && currentTime - lastSwitchTime > sendingDuration) {
     // After sending for 1 second, switch to listening mode
@@ -173,16 +169,7 @@ void loop() {
   
 
   //delay(20);
-  digitalWrite(TFT_CS, LOW);
-SPI.beginTransaction(settingsDevice2);
-//delay(100);
   
-  
-  SPICOM = true;
-  bool connected = true; // hodnotu by som bral z nejakej get funkcie
-  updateDisplay(connected, displayState);
-digitalWrite(TFT_CS, HIGH);
-  SPI.endTransaction();
     //Serial.println("Sending data...");
    // delay(10); // Small delay to avoid spamming too fast
   }
@@ -196,25 +183,35 @@ digitalWrite(TFT_CS, HIGH);
       awaitingData = false; // Reset flag after receiving data
       isSending = true; // Switch back to sending mode
       lastSwitchTime = millis(); // Update the switch time
-      Serial.println(dataReceived.sonarDistance);
+      Serial.print(dataReceived.sonarDistance);
+      Serial.print("  ");
+      Serial.println(dataReceived.sonarFIshFoundNum);
+      radioAvailable = true;
     }
     
 
     else{
       //TODO Not connected to the boat
+      //radioAvailable = false;
     }
   }
 
+  digitalWrite(TFT_CS, LOW);
+  SPI.beginTransaction(settingsDevice2);
   //delay(100);
+  
+  
+  //bool radioAvailable = true; // hodnotu by som bral z nejakej get funkcie
+  updateDisplay(radioAvailable, displayState);
+digitalWrite(TFT_CS, HIGH);
+  SPI.endTransaction();
 
+  //delay(100);
 
 }
 
-
-
 void drawFishFinder(float sonarData, int lineThickness) {
     const float maxDistance = 600.0;  // Maximum distance (adjust based on your sonar)
-    const uint8_t SCROLL_AMOUNT = 6;
     const uint8_t LAKE_FLOOR_HEIGHT = 20;
     const uint8_t TOP_BAR_MARGIN = 40;
 
@@ -233,7 +230,7 @@ void drawFishFinder(float sonarData, int lineThickness) {
     }
 
     // Increment draw index
-    displaySonarDrawIndex += SCROLL_AMOUNT;
+    displaySonarDrawIndex += lineThickness;
 
     // Check if draw index has reached or exceeded the screen width
     if (displaySonarDrawIndex >= tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN) {
@@ -548,11 +545,11 @@ void updateMainScreenGpsValues() {
 }
 
 void updateMainScreenSonarValues() {  
-  //float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
-  float sonarData = dataReceived.sonarDistance;
+  float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
+  //float sonarData = dataReceived.sonarDistance;
 
   // Draw fish finder point based on sonar data
-  drawFishFinder(sonarData, 6);
+  drawFishFinder(sonarData, 1);
 
   uint16_t rectX = 20;
   uint16_t rectY = 40;
@@ -584,7 +581,7 @@ void updateMainScreenSonarValues() {
   tft.print(height);
   tft.print(" cm");
 
-  uint16_t numberOfFish = dataReceived.sonarFIshFoundNum;
+  int16_t numberOfFish = dataReceived.sonarFIshFoundNum;
   tft.setCursor(tft.width() - 120, 24);
   tft.print("Fish: "); 
   tft.setCursor(tft.width() - 120, 32);
@@ -717,7 +714,8 @@ void updateDisplay(bool connected, struct DisplayState *state) {
   handleConfirmButton(state, currentGpsSelection);
   handleHomeButton(state);  
 
-  uint8_t numberOfSatellites = 4; // TODO: GETTER
+  //int16_t numberOfSatellites = dataReceived.NumOfSats;
+  int16_t numberOfSatellites = 5;
 
   /// Update values ================
   if (connected && numberOfSatellites > 3) {
@@ -807,3 +805,4 @@ void initDisplay(DisplayScreens defaultScreen) {
       break;
   }
 }
+
