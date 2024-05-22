@@ -80,6 +80,9 @@ struct SensorData{
   double actualGpsPositionLat;
 };
 
+SensorData dataReceived;
+commandData dataToSend;
+
 const int pinDriveYAxis = A0;
 const int pinDriveXAxis = A1;
 const int pinDumpLeft = A2; //normally 7
@@ -156,7 +159,7 @@ void loop() {
 
   if (isSending) {
     // Create some data to send
-    commandData dataToSend;
+    
     dataToSend.yAxis = analogRead(pinDriveYAxis);
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
@@ -188,7 +191,7 @@ digitalWrite(TFT_CS, HIGH);
   if (!isSending && awaitingData) {
     
     if (radio.available()) {
-      SensorData dataReceived;
+      
       radio.read(&dataReceived, sizeof(dataReceived));
       awaitingData = false; // Reset flag after receiving data
       isSending = true; // Switch back to sending mode
@@ -545,7 +548,8 @@ void updateMainScreenGpsValues() {
 }
 
 void updateMainScreenSonarValues() {  
-  float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
+  //float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
+  float sonarData = dataReceived.sonarDistance;
 
   // Draw fish finder point based on sonar data
   drawFishFinder(sonarData, 6);
@@ -580,7 +584,7 @@ void updateMainScreenSonarValues() {
   tft.print(height);
   tft.print(" cm");
 
-  uint16_t numberOfFish = 12;
+  uint16_t numberOfFish = dataReceived.sonarFIshFoundNum;
   tft.setCursor(tft.width() - 120, 24);
   tft.print("Fish: "); 
   tft.setCursor(tft.width() - 120, 32);
