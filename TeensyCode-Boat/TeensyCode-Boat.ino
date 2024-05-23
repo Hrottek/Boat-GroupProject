@@ -51,6 +51,9 @@ struct SensorData {
 SensorData dataToSend;
 commandData dataToReceive;
 
+// battery
+const int batteryPin = A17;
+
 
 //GPS
 void getGPSPoint();
@@ -65,6 +68,7 @@ double haversine(double lat1, double lon1, double lat2, double lon2);
 static const long GPSbaud = 9600;
 
 uint8_t gps_dataAvailable = 0;
+uint8_t gps_hasCorrectData = 0;
 
 double gps_point_lat_lon_array[4][2];
 uint32_t gps_satelite_number = 0;
@@ -77,6 +81,8 @@ TinyGPSPlus gps;
 
 unsigned long gps_previousMillis = 0UL;
 unsigned long gps_interval = 1000UL;
+
+unsigned long gps_previousMillis2 = 0UL;
 
 //GPS END
 
@@ -165,40 +171,45 @@ void setup() {
 
 void loop() {
   //sendDataToArduino();
-  // if (radio.available()) {
-  //   radio.read(&dataToReceive, sizeof(commandData));
-  //   // Serial.print(dataToReceive.yAxis);
-  //   // Serial.print("  ");
-  //   // Serial.print(dataToReceive.xAxis);
-  //   // Serial.print("  ");
-  //   // Serial.print(isTimerLeftDumpTriggered);
-  //   // Serial.print("  ");
-  //   // Serial.println(isTimerRightDumpTriggered);
+  if (radio.available()) {
+    radio.read(&dataToReceive, sizeof(commandData));
+    Serial.print(dataToReceive.yAxis);
+    Serial.print("  ");
+    Serial.print(dataToReceive.xAxis);
+    Serial.print("  ");
+    Serial.print(isTimerLeftDumpTriggered);
+    Serial.print("  ");
+    Serial.println(isTimerRightDumpTriggered);
 
-  //   if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
-  //     triggerFunctionsNonBlockingLeftDump();
-  //   }
+    if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
+      triggerFunctionsNonBlockingLeftDump();
+    }
 
-  //   if (dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
-  //     triggerFunctionsNonBlockingRightDump();
-  //   }
+    if (dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
+      triggerFunctionsNonBlockingRightDump();
+    }
 
-  //   drive(dataToReceive.xAxis, dataToReceive.yAxis);
-  // }
+    drive(dataToReceive.xAxis, dataToReceive.yAxis);
+  }
 
-  // else {
-  //   //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
-  // }  
+  else {
+    //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
+  }
+  //Serial.print("Battery level = ");
+ // Serial.println(analogRead(batteryPin));
    
   // //Sonar
    processSonar();
+   Serial.println(dataToSend.actualGpsPositionLat,10);
+   Serial.println(dataToSend.actualGpsPositionLon,10);
+   Serial.println(dataToSend.NumOfSats);
    // Sonar END
 
   //GPS
   processGps();
   //GPS ENd
 
-//sendDataToArduino(); 
+sendDataToArduino(); 
 
     delay(10);
 }
@@ -518,6 +529,7 @@ void processGps() {
               calculateGPSDistanceAndHeading();
             }
           }
+          gps_previousMillis = currentMillis;
         }
         
         if(gps_point_counter >= 4){
@@ -527,24 +539,38 @@ void processGps() {
             gps_point_lat_lon_array[i][1] = gps_point_lat_lon_array[i+1][1];
           }
         }
+
+        currentMillis = millis();
+        if(currentMillis - gps_previousMillis2 > 5000 && gps_hasCorrectData){
+          Serial.println("We here");
+          dataToSend.actualGpsPositionLat = 0;
+          dataToSend.actualGpsPositionLon = 0;
+          dataToSend.NumOfSats = 0;
+          gps_hasCorrectData = 0;
       }
     }
   }
-  if(!Serial7.available()){
-    //Serial.println("GPS UNAVAILABLE");
-    gps_dataAvailable = 0;
   }
+  // if(!Serial7.available()){
+  //   Serial.println("GPS UNAVAILABLE");
+  //   gps_dataAvailable = 0;
+  // }
 
-  if(gps_dataAvailable){
-    dataToSend.actualGpsPositionLat = getNewestLat();
-    dataToSend.actualGpsPositionLon = getNewestLng();
+  if(gps_hasCorrectData){
+    Serial.println();
+    Serial.print("Coordinates = ");
+    double temp = getNewestLat();
+    Serial.print(temp,10);
+    Serial.print(", ");
+    dataToSend.actualGpsPositionLat = temp;
+    temp = getNewestLng();
+    Serial.print(temp,10);
+    Serial.print(", ");
+    dataToSend.actualGpsPositionLon = temp;
     dataToSend.NumOfSats = gps_satelite_number;
-    gps_dataAvailable = 0;
-  }
-  else{
-    dataToSend.actualGpsPositionLat = 0;
-    dataToSend.actualGpsPositionLon = 0;
-    dataToSend.NumOfSats = 0;
+    Serial.print(", ");
+    Serial.println(gps_satelite_number);
+    //gps_dataAvailable = 0;
   }
 }
 
@@ -577,8 +603,12 @@ double haversine(double lat1, double lon1, double lat2, double lon2) {
 void getGPSPoint(){
   if(gps_point_counter < 4){
     if (gps.location.isValid() && gps.location.isUpdated()) {
-      if(gps_point_counter > 1)
+      if(gps_point_counter > 1){
+        unsigned long currentMillis = millis();
         gps_dataAvailable = 1;
+        gps_hasCorrectData = 1;
+        gps_previousMillis2 = currentMillis;
+      }
       else
         gps_dataAvailable = 0;
 
@@ -617,10 +647,10 @@ void calculateGPSDistanceAndHeading(){
 
   gps_heading_degrees = gps.courseTo(gps_point_lat_lon_array[gps_point_counter-2][0] , gps_point_lat_lon_array[gps_point_counter-2][1], 
                               gps_point_lat_lon_array[gps_point_counter-1][0], gps_point_lat_lon_array[gps_point_counter-1][1]);
-  Serial.print(distance,5);
-  Serial.print(",");
-  Serial.print(fullDistanceTraveled,5);
-  Serial.print(",");
-  Serial.println(gps_heading_degrees);
+  // Serial.print(distance,5);
+  // Serial.print(",");
+  // Serial.print(fullDistanceTraveled,5);
+  // Serial.print(",");
+  // Serial.println(gps_heading_degrees);
 }
 ////////////////GPS END////////////

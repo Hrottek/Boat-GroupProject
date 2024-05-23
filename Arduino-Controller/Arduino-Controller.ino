@@ -88,6 +88,7 @@ const int pinDriveYAxis = A1;
 const int pinDriveXAxis = A0;
 const int pinDumpLeft = A2; //normally 7
 const int pinDumpRight = A3; //normally 8
+//const int pinBattery = A17;
 
 bool firstInitTime = false;
 
@@ -124,10 +125,7 @@ void setup() {
   pinMode(pinCSN, OUTPUT);
   pinMode(TFT_CS, OUTPUT);
 
-
   initDisplay(GPS_SCREEN);
-
-  
 }
 
 void loop() {
@@ -199,7 +197,13 @@ digitalWrite(TFT_CS, HIGH);
       lastSwitchTime = millis(); // Update the switch time
       Serial.print(dataReceived.sonarDistance);
       Serial.print("  ");
-      Serial.println(dataReceived.sonarFIshFoundNum);
+      Serial.print(dataReceived.sonarFIshFoundNum);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLat);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLon);
+      Serial.print("  ");
+      Serial.println(dataReceived.NumOfSats);
     }
     
 
