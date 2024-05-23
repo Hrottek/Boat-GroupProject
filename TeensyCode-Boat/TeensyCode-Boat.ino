@@ -2,7 +2,6 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 #include <TinyGPS++.h>
-#include <SoftwareSerial.h>
 #include <math.h>
 
 // 16/3/2024
@@ -46,6 +45,7 @@ struct SensorData {
   int16_t sonarFIshFoundNum;
   double actualGpsPositionLon;
   double actualGpsPositionLat;
+  int16_t NumOfSats;
 };
 
 SensorData dataToSend;
@@ -54,25 +54,30 @@ commandData dataToReceive;
 
 //GPS
 void getGPSPoint();
+void gpsLoop();
+double getNewestLat();
+double getNewestLng();
 void calculateGPSDistance();
 double haversine(double lat1, double lon1, double lat2, double lon2);
 
-static const uint8_t RXPin = 25;
-static const uint8_t TXpin = 24;
+//static const uint8_t GPS_RXpin = 4;
+//static const uint8_t GPS_TXpin = 3;
 static const long GPSbaud = 9600;
+
+uint8_t gps_dataAvailable = 0;
 
 double gps_point_lat_lon_array[4][2];
 uint32_t gps_satelite_number = 0;
-uint8_t gps_point_counter = 0;
-double gps_lat_lon_treshold = 0.000018;
+uint8_t gps_point_counter = 0; 
 double gps_heading_degrees = 0.0;
 double fullDistanceTraveled = 0;
 
 TinyGPSPlus gps;
-SoftwareSerial ss(RXPin, TXpin);
+//SoftwareSerial Serial7(GPS_RXpin, GPS_TXpin);
 
-unsigned long previousMillis = 0UL;
-unsigned long interval = 1000UL;
+unsigned long gps_previousMillis = 0UL;
+unsigned long gps_interval = 1000UL;
+
 //GPS END
 
 
@@ -85,6 +90,11 @@ const long intervalSonar = 100;
 int previousDistance = -1;
 unsigned long fishTimestamps[100];
 int fishCount = 0;
+
+unsigned long triggerTime = 0;
+volatile unsigned long echoStartTime = 0;
+volatile unsigned long echoEndTime = 0;
+volatile bool echoReceived = false;
 
 
 
@@ -101,7 +111,7 @@ bool isTimerRightDumpTriggered = false;
 const int pinDriveLeftDirection1 = 6;
 const int pinDriveLeftDirection2 = 7;
 const int pinDriveRightDirection1 = 8;
-const int pinDriveRightDirection2 = 9;
+const int pinDriveRightDirection2 = 27;
 const int pinDumpLeftDirection1 = 23;
 const int pinDumpLeftDirection2 = 22;
 const int pinDumpRightDirection1 = 21;
@@ -150,42 +160,45 @@ void setup() {
   memset(fishTimestamps, 0, sizeof(fishTimestamps));
 
   //GPS
-  ss.begin(9600);
+  Serial7.begin(9600);  // Initialize Serial6 at 9600 baud
 }
 
 void loop() {
   //sendDataToArduino();
-  if (radio.available()) {
-    radio.read(&dataToReceive, sizeof(commandData));
-    Serial.print(dataToReceive.yAxis);
-    Serial.print("  ");
-    Serial.print(dataToReceive.xAxis);
-    Serial.print("  ");
-    Serial.print(isTimerLeftDumpTriggered);
-    Serial.print("  ");
-    Serial.println(isTimerRightDumpTriggered);
+  // if (radio.available()) {
+  //   radio.read(&dataToReceive, sizeof(commandData));
+  //   // Serial.print(dataToReceive.yAxis);
+  //   // Serial.print("  ");
+  //   // Serial.print(dataToReceive.xAxis);
+  //   // Serial.print("  ");
+  //   // Serial.print(isTimerLeftDumpTriggered);
+  //   // Serial.print("  ");
+  //   // Serial.println(isTimerRightDumpTriggered);
 
-    if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
-      triggerFunctionsNonBlockingLeftDump();
-    }
+  //   if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
+  //     triggerFunctionsNonBlockingLeftDump();
+  //   }
 
-    if (dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
-      triggerFunctionsNonBlockingRightDump();
-    }
+  //   if (dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
+  //     triggerFunctionsNonBlockingRightDump();
+  //   }
 
-    drive(dataToReceive.xAxis, dataToReceive.yAxis);
-  }
+  //   drive(dataToReceive.xAxis, dataToReceive.yAxis);
+  // }
 
-  else {
-    //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
-  }
-  sendDataToArduino();
-  //Sonar
-  processSonar();
+  // else {
+  //   //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
+  // }  
+   
+  // //Sonar
+   processSonar();
+   // Sonar END
 
   //GPS
   processGps();
-    //GPS ENd
+  //GPS ENd
+
+//sendDataToArduino(); 
 
     delay(10);
 }
@@ -230,8 +243,13 @@ void triggerFunctionsNonBlockingRightDump() {
 void sendDataToArduino() {
 
   radio.stopListening();
-  dataToSend.sonarDistance = 5;  // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
+  dataToSend.sonarDistance = previousDistance;  // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
+  dataToSend.sonarFIshFoundNum = fishCount;
+  // dataToSend.actualGpsPositionLat = 
+  // dataToSend.actualGpsPositionLon = 
+  //Serial.println("Sending");
   while (radio.write(&dataToSend, sizeof(SensorData))) {
+    //Serial.println("Sending 1");
     //Keep sending until you acnowledge
     //TODO after 15 sec return home
   }
@@ -239,6 +257,7 @@ void sendDataToArduino() {
   radio.startListening();
 }
 
+///////////Drive Manual////////////////
 void drive(int xData, int yData) {
   setMiddlePoint(500, 500);
   Direction direction = setMovement(xData, yData);
@@ -387,7 +406,7 @@ int setSpeed(int joystick) {  //joystick - hodnota kt. budeme ziskavat z joystic
   else
     return fastSpeed;
 }
-
+////////////Drive Manuel END ////////////////////
 
 ////////////Sonar//////////////////
 void processSonar() {
@@ -397,18 +416,20 @@ void processSonar() {
   if (currentMillis - previousMillisSonar >= intervalSonar) {
     previousMillisSonar = currentMillis;
     int duration = measureDistance();
+    //int duration = 20;
     int distance = duration / 58;  //air
     // int distance = duration / 250;  //water
-    // Serial.print("Distance: ");
-    // Serial.print(distance);
-    // Serial.print(" cm  ");
-    // Serial.print("Fish Count: ");
-    //   Serial.println(fishCount);
-
-    if (previousDistance != -1 && previousDistance - distance > previousDistance * 0.7) {
-      recordFish(currentMillis);
-      Serial.print("Fish Count: ");
+    Serial.print("Distance: ");
+    Serial.print(distance);
+    Serial.print(" cm  ");
+    Serial.print("Fish Count: ");
       Serial.println(fishCount);
+  
+
+    if (previousDistance != -1 && previousDistance - distance > previousDistance * 0.3) {
+      recordFish(currentMillis);
+      // Serial.print("Fish Count: ");
+      // Serial.println(fishCount);
     }
     previousDistance = distance;
   }
@@ -440,91 +461,130 @@ int measureDistance() {
   delayMicroseconds(10);
   digitalWrite(TRIGPIN, LOW);
   return pulseIn(ECHOPIN, HIGH);
+  //return 20;
+}
+
+int measureDistanceNonBlocking() {
+  if (!echoReceived) {
+    if (triggerTime == 0) {
+      // Trigger the pulse
+      digitalWrite(TRIGPIN, LOW);
+      delayMicroseconds(2);
+      digitalWrite(TRIGPIN, HIGH);
+      delayMicroseconds(10);
+      digitalWrite(TRIGPIN, LOW);
+      triggerTime = micros();
+    } else if (micros() - triggerTime > 20000) { // 20ms timeout
+      triggerTime = 0; // Reset for the next trigger
+      return -1; // Timeout
+    }
+  } else {
+    // Calculate pulse duration
+    unsigned long duration = echoEndTime - echoStartTime;
+    echoReceived = false; // Reset for the next measurement
+    triggerTime = 0; // Reset for the next trigger
+    return duration;
+  }
+  return -1; // Measurement not complete yet
+}
+
+void echoISR() {
+  if (digitalRead(ECHOPIN) == HIGH) {
+    echoStartTime = micros();
+  } else {
+    echoEndTime = micros();
+    echoReceived = true;
+  }
 }
 
 /////////////Sonar End//////////////
 
 
 /////////////////GPS////////////////
-
 void processGps() {
-  Serial.println(ss.available());
-  if (ss.available() > 0) {
-
-    if (gps.encode(ss.read())) {
-      if (gps.location.isValid()) {
+  //Serial.println("HELLO");
+  while (Serial7.available() > 0) {
+   // Serial.println("GPS AVAILABLE");
+    char c = Serial7.read();
+    //Serial.print(c);
+    if(gps.encode(c)){
+      if(gps.location.isValid()){
         unsigned long currentMillis = millis();
 
-        if (currentMillis - previousMillis > interval) {
-          if (gps_point_counter < 4) {
+        if(currentMillis - gps_previousMillis > gps_interval){
+          if(gps_point_counter < 4){
             getGPSPoint();
-            calculateGPSDistanceAndHeading();
-            Serial.println();
+            if(gps_dataAvailable == 1){
+              calculateGPSDistanceAndHeading();
+            }
           }
         }
-
-        if (gps_point_counter >= 4) {
+        
+        if(gps_point_counter >= 4){
           gps_point_counter--;
-          for (uint8_t i = 0; i < gps_point_counter; i++) {
-            gps_point_lat_lon_array[i][0] = gps_point_lat_lon_array[i + 1][0];
-            gps_point_lat_lon_array[i][1] = gps_point_lat_lon_array[i + 1][1];
+          for(uint8_t i = 0; i < gps_point_counter; i++){
+            gps_point_lat_lon_array[i][0] = gps_point_lat_lon_array[i+1][0];
+            gps_point_lat_lon_array[i][1] = gps_point_lat_lon_array[i+1][1];
           }
         }
       }
     }
-
-    if (millis() > 5000 && gps.charsProcessed() < 10) {
-      Serial.println("-1");
-    }
   }
+  if(!Serial7.available()){
+    //Serial.println("GPS UNAVAILABLE");
+    gps_dataAvailable = 0;
+  }
+
+  if(gps_dataAvailable){
+    dataToSend.actualGpsPositionLat = getNewestLat();
+    dataToSend.actualGpsPositionLon = getNewestLng();
+    dataToSend.NumOfSats = gps_satelite_number;
+    gps_dataAvailable = 0;
+  }
+  else{
+    dataToSend.actualGpsPositionLat = 0;
+    dataToSend.actualGpsPositionLon = 0;
+    dataToSend.NumOfSats = 0;
+  }
+}
+
+double getNewestLat(){
+  if(gps_point_counter < 1 || gps_point_counter > 4){
+    return -1.0;
+  }
+  return gps_point_lat_lon_array[gps_point_counter][0];
+}
+
+double getNewestLng(){
+  if(gps_point_counter < 1 || gps_point_counter > 4){
+    return -1.0;
+  }
+  return gps_point_lat_lon_array[gps_point_counter][1];
 }
 
 double haversine(double lat1, double lon1, double lat2, double lon2) {
-  const double rEarth2 = 6372795.0;
-  //const double rEarth = 6371000.0; // in meters
-  double x = pow(sin(((lat2 - lat1) * M_PI / 180.0) / 2.0), 2.0);
-  double y = cos(lat1 * M_PI / 180.0) * cos(lat2 * M_PI / 180.0);
-  double z = pow(sin(((lon2 - lon1) * M_PI / 180.0) / 2.0), 2.0);
-  double a = x + y * z;
-  double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
-  double d = rEarth2 * c;
-  return d;  // in meters
+    const double rEarth2 = 6372795.0;
+    const double rEarth = 6371000.0;
+    double x = pow( sin( ((lat2 - lat1)*M_PI/180.0) / 2.0), 2.0 );
+    double y = cos(lat1*M_PI/180.0) * cos(lat2*M_PI/180.0);
+    double z = pow( sin( ((lon2 - lon1)*M_PI/180.0) / 2.0), 2.0 );
+    double a = x + y * z;
+    double c = 2.0 * atan2(sqrt(a), sqrt(1.0-a));
+    double d = rEarth2 * c;
+    return d;
 }
 
-void calculateGPSDistanceAndHeading() {
-  if (gps_point_counter <= 1) {
-    return;
-  }
-  double distance = haversine(gps_point_lat_lon_array[gps_point_counter - 2][0], gps_point_lat_lon_array[gps_point_counter - 2][1],
-                              gps_point_lat_lon_array[gps_point_counter - 1][0], gps_point_lat_lon_array[gps_point_counter - 1][1]);
-
-  double distance2 = gps.distanceBetween(gps_point_lat_lon_array[gps_point_counter - 2][0], gps_point_lat_lon_array[gps_point_counter - 2][1],
-                                         gps_point_lat_lon_array[gps_point_counter - 1][0], gps_point_lat_lon_array[gps_point_counter - 1][1]);
-
-  if (distance2 > 2.0 || distance > 2.0) {
-    distance = 0.0;
-    distance2 = 0.0;
-  }
-
-  distance = (distance + distance2) / 2.0;
-
-  fullDistanceTraveled += distance;
-
-  gps_heading_degrees = gps.courseTo(gps_point_lat_lon_array[gps_point_counter - 2][0], gps_point_lat_lon_array[gps_point_counter - 2][1],
-                                     gps_point_lat_lon_array[gps_point_counter - 1][0], gps_point_lat_lon_array[gps_point_counter - 1][1]);
-
-  Serial.print(distance, 10);
-  Serial.print(",");
-  Serial.print(fullDistanceTraveled, 10);
-}
-
-void getGPSPoint() {
-  if (gps_point_counter < 4) {
+void getGPSPoint(){
+  if(gps_point_counter < 4){
     if (gps.location.isValid() && gps.location.isUpdated()) {
-      //  displayInfo();
+      if(gps_point_counter > 1)
+        gps_dataAvailable = 1;
+      else
+        gps_dataAvailable = 0;
+
       Serial.print("1");
       Serial.print(",");
-
+      
       gps_satelite_number = gps.satellites.value();
       Serial.print(gps_satelite_number);
       Serial.print(",");
@@ -532,17 +592,35 @@ void getGPSPoint() {
       gps_point_lat_lon_array[gps_point_counter][0] = gps.location.lat();
       gps_point_lat_lon_array[gps_point_counter][1] = gps.location.lng();
 
-      Serial.print(gps_point_lat_lon_array[gps_point_counter][0], 10);
+      Serial.print(gps_point_lat_lon_array[gps_point_counter][0],10);
       Serial.print(",");
 
-      Serial.print(gps_point_lat_lon_array[gps_point_counter][1], 10);
+      Serial.print(gps_point_lat_lon_array[gps_point_counter][1],10);
       Serial.print(",");
-
       gps_point_counter++;
-    } else {
-      Serial.print("0");
-      Serial.print(",");
+    }
+    else{
+      gps_dataAvailable = 0;
     }
   }
+}
+
+void calculateGPSDistanceAndHeading(){
+  double distance = haversine(gps_point_lat_lon_array[gps_point_counter-2][0] , gps_point_lat_lon_array[gps_point_counter-2][1], 
+                             gps_point_lat_lon_array[gps_point_counter-1][0], gps_point_lat_lon_array[gps_point_counter-1][1]);
+  if(distance > 2.0){
+    distance = 0.0;
+  }
+  if(distance != 0.0){
+    fullDistanceTraveled += distance;
+  }
+
+  gps_heading_degrees = gps.courseTo(gps_point_lat_lon_array[gps_point_counter-2][0] , gps_point_lat_lon_array[gps_point_counter-2][1], 
+                              gps_point_lat_lon_array[gps_point_counter-1][0], gps_point_lat_lon_array[gps_point_counter-1][1]);
+  Serial.print(distance,5);
+  Serial.print(",");
+  Serial.print(fullDistanceTraveled,5);
+  Serial.print(",");
+  Serial.println(gps_heading_degrees);
 }
 ////////////////GPS END////////////
