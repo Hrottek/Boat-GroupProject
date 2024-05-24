@@ -89,6 +89,11 @@ unsigned long gps_interval = 1000UL;
 
 unsigned long gps_previousMillis2 = 0UL;
 
+unsigned long gps_coldStartTime = 0UL;
+
+uint8_t gps_starting = 1;
+uint8_t gps_get_data_tries = 0;
+
 //GPS END
 
 
@@ -211,6 +216,9 @@ void loop() {
    // Sonar END
 
   //GPS
+  
+  if(gps_starting)
+    gps_coldStartTime = millis();
   processGps();
 
   // uint temp1 = round(48.5641198489998198156 *10000000);
@@ -546,6 +554,24 @@ void processGps() {
    // Serial.println("GPS AVAILABLE");
     char c = Serial7.read();
     //Serial.print(c);
+    unsigned long currentMillis3 = millis();
+    if(gps_starting && (currentMillis3 - gps_coldStartTime) > 30000){
+      dataToSend.coldStart = 1;
+      gps_starting = 0;
+    }
+    else if(gps_starting && (currentMillis3 - gps_coldStartTime) < 30000){
+      dataToSend.coldStart = 0;
+      dataToSend.actualGpsPositionLat1 = 0;
+      dataToSend.actualGpsPositionLon1 = 0;
+      dataToSend.actualGpsPositionLat2 = 0;
+      dataToSend.actualGpsPositionLon2 = 0;
+      dataToSend.NumOfSats = 0;
+      return;
+    }
+    if(!gps_starting){
+      dataToSend.coldStart = 1;
+    }
+
     if(gps.encode(c)){
       if(gps.location.isValid()){
         unsigned long currentMillis = millis();
@@ -577,10 +603,11 @@ void processGps() {
           dataToSend.actualGpsPositionLon2 = 0;
           dataToSend.NumOfSats = 0;
           gps_hasCorrectData = 0;
+        }
       }
     }
   }
-  }
+
   // if(!Serial7.available()){
   //   Serial.println("GPS UNAVAILABLE");
   //   gps_dataAvailable = 0;
