@@ -37,6 +37,7 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 enum DisplayScreens {
     NONE = 0,
     ERROR_SCREEN = -1,
+    ERROR_NOT_ENOUGH_SATELLITES = -2,
     GPS_SCREEN = 1,
     SONAR_SCREEN = 2
 };
@@ -52,16 +53,25 @@ struct DisplayState {
   DisplayScreens currentScreen;
   bool menuButtonPressed;
   bool selectButtonPressed;
-  bool confirmButtonPressed;
   bool homeButtonPressed;
+  bool holdingButton;
+};
+
+struct DisplayGpsPositionData {
+  float longitudes[4];
+  float latitudes[4];
+  bool empty[4];
 };
 
 struct DisplayGpsSelectionData *currentGpsSelection;
 struct DisplayState *displayState;
+struct DisplayGpsPositionData gpsPositionData;
 
 // Circular buffer to hold lake floor data
 uint16_t displayLakeFloorBuffer[DISPLAY_WIDTH - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN];
 uint16_t displaySonarDrawIndex;
+
+unsigned long display_previousMillis = 0UL;
 
 struct commandData {
   int16_t xAxis;
@@ -73,7 +83,7 @@ struct commandData {
   bool returnHome; //return Home if needed
 };
 
-struct SensorData{
+struct SensorData {
   int16_t sonarDistance;
   int16_t sonarFIshFoundNum;
   double actualGpsPositionLon;
@@ -103,7 +113,6 @@ const int pinCSN = 7; //10 normally
 RF24 radio(pinCE, pinCSN); // CE, CSN pins configuration
 const byte addresses[][6] = {"1Node", "2Node"};
 
-
 SPISettings settingsDevice1(4000000, MSBFIRST, SPI_MODE0); // Example settings for device 1
 SPISettings settingsDevice2(2000000, MSBFIRST, SPI_MODE1); // Example settings for device 2
 
@@ -122,15 +131,12 @@ void setup() {
   pinMode(pinCSN, OUTPUT);
   pinMode(TFT_CS, OUTPUT);
 
-
-  initDisplay(GPS_SCREEN);
-
-  
+  initDisplay(GPS_SCREEN);  
 }
 
 void loop() {
 
-  if(!firstInitTime){
+  if(!firstInitTime) {
     lastSwitchTime = millis();
     firstInitTime = true;
   }    
@@ -160,16 +166,14 @@ void loop() {
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
     dataToSend.rightDump = digitalRead(pinDumpRight);
-    Serial.println(dataToSend.yAxis);
+    //Serial.println(dataToSend.yAxis);
     radio.stopListening(); // Ensure we're not in listening mode
     radio.write(&dataToSend, sizeof(dataToSend)); // Send data
 
     digitalWrite(pinCSN, HIGH);
-  SPI.endTransaction();
-  
+    SPI.endTransaction(); 
 
-  //delay(20);
-  
+    //delay(20);  
     //Serial.println("Sending data...");
    // delay(10); // Small delay to avoid spamming too fast
   }
@@ -187,10 +191,8 @@ void loop() {
       Serial.print("  ");
       Serial.println(dataReceived.sonarFIshFoundNum);
       radioAvailable = true;
-    }
-    
 
-    else{
+    } else {
       //TODO Not connected to the boat
       //radioAvailable = false;
     }
@@ -198,16 +200,11 @@ void loop() {
 
   digitalWrite(TFT_CS, LOW);
   SPI.beginTransaction(settingsDevice2);
-  //delay(100);
-  
-  
-  //bool radioAvailable = true; // hodnotu by som bral z nejakej get funkcie
+  //delay(100);  
   updateDisplay(radioAvailable, displayState);
-digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TFT_CS, HIGH);
   SPI.endTransaction();
-
   //delay(100);
-
 }
 
 void drawFishFinder(float sonarData, int lineThickness) {
@@ -337,7 +334,7 @@ void updateTopBar(bool connected, uint8_t numberOfSatellites, DisplayScreens cur
       tft.setCursor(100, 2);
       tft.setTextSize(1);
       tft.setTextColor(ST77XX_WHITE);
-      tft.print("No screen selected");
+      tft.print("Error");
       break;
   }
 }
@@ -433,35 +430,45 @@ void drawErrorScreen(uint8_t error) {
   uint16_t rectX = 0;
   uint16_t rectY = 0;
   uint16_t rectWidth = tft.width();
-  uint16_t rectHeight = tft.height();
-  
-  /// Fill background
-  tft.fillRect(rectX, rectY, rectWidth, rectHeight, ST77XX_BLACK);
-  tft.drawRect(rectX, rectY, rectWidth, rectHeight, ST77XX_RED);
-
-  /// Draw inner rectangle
-  tft.fillRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_BLACK);
-  tft.drawRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_RED);
-
-  rectX = rectX + 20;
-  rectY = rectY + 20;
-
-  /// Display error message
-  tft.setTextColor(ST77XX_RED);
-  tft.setTextSize(3);
+  uint16_t rectHeight = tft.height();  
 
   switch (error) {
     case 1:
+      /// Fill background
+      tft.fillRect(rectX, rectY, rectWidth, rectHeight, ST77XX_BLACK);
+      tft.drawRect(rectX, rectY, rectWidth, rectHeight, ST77XX_RED);
+
+      /// Draw inner rectangle
+      tft.fillRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_BLACK);
+      tft.drawRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_RED);
+
+      rectX = rectX + 20;
+      rectY = rectY + 20;
+
+      /// Display error message
+      tft.setTextColor(ST77XX_RED);
+      tft.setTextSize(3);
+
       tft.setCursor(rectX + 90, rectY + 60);  
       tft.print("ERROR!");
       tft.setCursor(rectX + 16, rectY + 20 + 80);
       tft.print("NO CONNECTION!");
       break;
     case 2:
-      tft.setCursor(rectX + 48, rectY + 60);  
-      tft.print("NOT ENOUGH");
-      tft.setCursor(rectX + 44, rectY + 20 + 80);
-      tft.print("SATELLITES!");
+      /// Fill background
+      tft.fillRect(rectX, 20, rectWidth, rectHeight, ST77XX_BLACK);
+
+      rectX = rectX + 20;
+      rectY = rectY + 20;
+
+      /// Display error message
+      tft.setTextColor(ST77XX_RED);
+      tft.setTextSize(1);
+
+      tft.setCursor(rectX + 64, rectY + 60);  
+      tft.print("NOT ENOUGH SATELLITES!");
+      tft.setCursor(rectX + 64, rectY + 20 + 80);
+      tft.print("USE MANUAL CONTROL!");
       break;
   }
 }
@@ -493,55 +500,80 @@ void updateMainScreenGpsValues() {
   tft.setTextSize(1); 
   tft.setTextColor(ST77XX_WHITE);
 
-  /// GPS Position 1
+  /// GPS Position 1 --------------------
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
 
-  tft.print("Lat: ");
-  float latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
+  if (gpsPositionData.empty[0] == true) {
+    tft.print("Lat: EMPTY");
+    tft.print(", Long: EMPTY");
 
-  tft.print(", Long: ");
-  float longitude = 73.562;
-  tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+  } else {
+    tft.print("Lat: ");
+    float latitude = gpsPositionData.latitudes[0]; // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print(latitude);
 
-  /// GPS Position 2
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
-
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
-
-  tft.print(", Long: ");
-  longitude = 73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 3
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
-
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
-
-  tft.print(", Long: ");
-  longitude = -73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
+    tft.print(", Long: ");
+    float longitude = gpsPositionData.longitudes[0];
+    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+  }
 
   rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
 
-  /// GPS Position 4
+  /// GPS Position 2 --------------------
+  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
+
+  if (gpsPositionData.empty[1] == true) {
+    tft.print("Lat: EMPTY");
+    tft.print(", Long: EMPTY");
+
+  } else {
+    tft.print("Lat: ");
+    float latitude = gpsPositionData.latitudes[1]; // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print(latitude);
+
+    tft.print(", Long: ");
+    float longitude = gpsPositionData.longitudes[1];
+    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+  }
+
+  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+
+  /// GPS Position 3 --------------------
+  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
+
+  if (gpsPositionData.empty[2] == true) {
+    tft.print("Lat: EMPTY");
+    tft.print(", Long: EMPTY");
+
+  } else {
+    tft.print("Lat: ");
+    float latitude = gpsPositionData.latitudes[2]; // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print(latitude);
+
+    tft.print(", Long: ");
+    float longitude = gpsPositionData.longitudes[2];
+    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+  }
+
+  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+
+  /// GPS Position 4 --------------------
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);  
 
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
+  if (gpsPositionData.empty[3] == true) {
+    tft.print("Lat: EMPTY");
+    tft.print(", Long: EMPTY");
 
-  tft.print(", Long: ");
-  longitude = -73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
+  } else {
+    tft.print("Lat: ");
+    float latitude = gpsPositionData.latitudes[3]; // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print(latitude);
 
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+    tft.print(", Long: ");
+    float longitude = gpsPositionData.longitudes[3];
+    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+    rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+  }
 }
 
 void updateMainScreenSonarValues() {  
@@ -656,9 +688,9 @@ void handleMenuButton(struct DisplayState *state) {
 }
 
 void handleSelectionButton(struct DisplayState *state, struct DisplayGpsSelectionData *currentGpsSelection) {
-  uint8_t selectionButtonState = digitalRead(DISPLAY_BUTTON_SELECT);
+  uint8_t selectionButtonState = digitalRead(DISPLAY_BUTTON_SELECT);  
 
-  if (selectionButtonState == LOW && state->currentScreen == GPS_SCREEN && !state->selectButtonPressed) {
+  if (selectionButtonState == LOW && state->currentScreen == GPS_SCREEN && !state->selectButtonPressed) {   
     switch (currentGpsSelection->nextPos) {
       case 1:
         currentGpsSelection->position = 1;
@@ -684,14 +716,67 @@ void handleSelectionButton(struct DisplayState *state, struct DisplayGpsSelectio
 
 void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionData *currentGpsSelection) {
   uint8_t confirmButtonState = digitalRead(DISPLAY_BUTTON_CONFIRM);
+  unsigned long display_interval = 100000;
 
-  if (confirmButtonState == LOW && state->currentScreen == GPS_SCREEN && !state->confirmButtonPressed) {
-    tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_GREEN);
-    Serial.print("Chosen position: ");
-    Serial.println(currentGpsSelection->position);
-    state->confirmButtonPressed = true;
-  } else if (confirmButtonState == HIGH) {
-    state->confirmButtonPressed = false;
+  const uint32_t SEND_TIME = 1*1000;
+  const uint32_t SAVE_TIME = 3*1000;
+  const uint32_t DELETE_TIME = 7*1000;
+
+  if (!state->currentScreen == GPS_SCREEN) {
+    return;
+  }
+
+  /// Visualization ----------------
+  if (state->holdingButton == true && confirmButtonState == LOW) { // ak sa drzi tlacidlo
+    display_interval = millis() - display_previousMillis;
+    
+    if (display_interval < SEND_TIME) { // SEND TO POS
+      tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_GREEN);
+    }
+      
+    if (display_interval > SEND_TIME && display_interval <= SAVE_TIME) { // SAVING         
+      tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_BLUE);
+    }
+      
+    if (display_interval > SAVE_TIME && display_interval <= DELETE_TIME) { // DELETE
+      tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_RED);
+    }    
+  }
+  
+  if (confirmButtonState == LOW && state->holdingButton == false) {
+    state->holdingButton = true;
+    display_previousMillis = millis();
+  }  
+
+  if (state->holdingButton == true && confirmButtonState == HIGH) {
+    state->holdingButton = false;
+
+    display_interval = millis() - display_previousMillis;
+    drawMainScreenGps();
+
+    if (display_interval < SEND_TIME) { // SEND TO POS
+      // TODO: Code for sending position to boat
+      Serial.println("Sent coords to boat!");
+
+    } else if (display_interval <= SAVE_TIME) { // SAVING
+      gpsPositionData.longitudes[currentGpsSelection->position-1] = 42.1;//dataReceived.actualGpsPositionLon;
+      gpsPositionData.latitudes[currentGpsSelection->position-1] = 32;//dataReceived.actualGpsPositionLat;
+      gpsPositionData.empty[currentGpsSelection->position-1] = false;
+
+      Serial.println("Saved position: empty: ");
+      Serial.println(gpsPositionData.empty[currentGpsSelection->position-1]);
+
+    } else if (display_interval <= DELETE_TIME) { // DELETE
+      gpsPositionData.longitudes[currentGpsSelection->position-1] = 0;
+      gpsPositionData.latitudes[currentGpsSelection->position-1] = 0;
+      gpsPositionData.empty[currentGpsSelection->position-1] = true;
+
+      Serial.println("Deleted position: empty: ");
+      Serial.println(gpsPositionData.empty[currentGpsSelection->position-1]);
+    }
+
+    /// Reselect ------------
+    selectMainScreenGps(currentGpsSelection);
   }
 }
 
@@ -709,35 +794,42 @@ void handleHomeButton(struct DisplayState *state) {
 void updateDisplay(bool connected, struct DisplayState *state) {
   DisplayScreens screen = state->currentScreen;
 
-  handleMenuButton(state);
-  handleSelectionButton(state, currentGpsSelection);
-  handleConfirmButton(state, currentGpsSelection);
-  handleHomeButton(state);  
+  if (screen == GPS_SCREEN || screen == SONAR_SCREEN) {
+    handleMenuButton(state);
+    handleSelectionButton(state, currentGpsSelection);
+    handleConfirmButton(state, currentGpsSelection);
+    handleHomeButton(state);
+  }
 
   //int16_t numberOfSatellites = dataReceived.NumOfSats;
   int16_t numberOfSatellites = 5;
 
   /// Update values ================
-  if (connected && numberOfSatellites > 3) {
+  if (connected) {
 
     if (screen != state->currentScreen)
       updateTopBarBackground();
 
     updateTopBar(connected, numberOfSatellites, state->currentScreen);
+
+    if (numberOfSatellites > 3) {
     
-    if (state->currentScreen == GPS_SCREEN) {
-      updateMainScreenGpsValues();
-    } else if (state->currentScreen == SONAR_SCREEN) {
-      updateMainScreenSonarValues();      
+      if (state->currentScreen == GPS_SCREEN) {
+        updateMainScreenGpsValues();
+      } else if (state->currentScreen == SONAR_SCREEN) {
+        updateMainScreenSonarValues();      
+      }
+
+    } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_NOT_ENOUGH_SATELLITES) {
+      state->currentScreen = ERROR_NOT_ENOUGH_SATELLITES;
+      updateTopBarBackground();
+      drawErrorScreen(2);
     }
 
   } else if (!connected && state->currentScreen != ERROR_SCREEN) {
     state->currentScreen = ERROR_SCREEN;
-    drawErrorScreen(1);
-  } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_SCREEN) {
-    state->currentScreen = ERROR_SCREEN;
-    drawErrorScreen(2);
-  }
+    drawErrorScreen(1);    
+  } 
 }
 
 void initDisplay(DisplayScreens defaultScreen) {
@@ -766,8 +858,8 @@ void initDisplay(DisplayScreens defaultScreen) {
       displayState->currentScreen = NONE;
       displayState->menuButtonPressed = false;
       displayState->selectButtonPressed = false;
-      displayState->confirmButtonPressed = false;
       displayState->homeButtonPressed = false;
+      displayState->holdingButton = false;
   }
 
   currentGpsSelection = new DisplayGpsSelectionData;
@@ -783,9 +875,15 @@ void initDisplay(DisplayScreens defaultScreen) {
   }  
 
   /// Initialize lake floor buffer with default values (bottom of the screen)
-  for (int i = 0; i < tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN; i++) {
+  for (size_t i = 0; i < tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN; i++) {
     displayLakeFloorBuffer[i] = tft.height();
   }
+
+  for (int i = 0; i < sizeof(gpsPositionData.empty); i++) {
+    gpsPositionData.empty[i] = true;
+    gpsPositionData.latitudes[i] = 0;
+    gpsPositionData.longitudes[i] = 0;
+  }  
 
   switch(defaultScreen) {
     case GPS_SCREEN:
