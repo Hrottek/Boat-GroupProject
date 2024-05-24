@@ -30,15 +30,19 @@ typedef enum {
 } Direction;  //svetove strany
 
 
+#pragma pack(push, 1)
 struct commandData {
   int16_t xAxis;
   int16_t yAxis;
   int16_t leftDump;
   int16_t rightDump;
-  double gpsGoToPosLat;
-  double gpsGoToPosLon;  //Ak su 0 tak nechod ak sa zmenia tak chod
+  uint16_t gpsGoToPosLat1;
+  uint16_t gpsGoToPosLat2;
+  uint16_t gpsGoToPosLon1;  //Ak su 0 tak nechod ak sa zmenia tak chod
+  uint16_t gpsGoToPosLon2;
   bool returnHome;       //return Home if needed
 };
+#pragma pack(pop)
 
 #pragma pack(push, 1)
 struct SensorData {
@@ -50,6 +54,7 @@ struct SensorData {
   uint16_t actualGpsPositionLat2;
   uint8_t NumOfSats;
   bool coldStart;
+  uint8_t batteryTeensy;
 };
 #pragma pack(pop)
 
@@ -57,7 +62,7 @@ SensorData dataToSend;
 commandData dataToReceive;
 
 // battery
-const int batteryPin = A17;
+const int batteryPin = A16;
 
 
 //GPS
@@ -164,6 +169,9 @@ void setup() {
   pinMode(pinPwmDumpLeft, OUTPUT);
   pinMode(pinPwmDumpRight, OUTPUT);
 
+  //Battery
+ // pinMode(A17, INPUT);
+
   //Ultrazvuk
   pinMode(ECHOPIN, INPUT_PULLUP);
   pinMode(TRIGPIN, OUTPUT);
@@ -178,13 +186,13 @@ void loop() {
   //sendDataToArduino();
   if (radio.available()) {
     radio.read(&dataToReceive, sizeof(commandData));
-    Serial.print(dataToReceive.yAxis);
-    Serial.print("  ");
-    Serial.print(dataToReceive.xAxis);
-    Serial.print("  ");
-    Serial.print(isTimerLeftDumpTriggered);
-    Serial.print("  ");
-    Serial.println(isTimerRightDumpTriggered);
+    // Serial.print(dataToReceive.yAxis);
+    // Serial.print("  ");
+    // Serial.print(dataToReceive.xAxis);
+    // Serial.print("  ");
+    // Serial.print(isTimerLeftDumpTriggered);
+    // Serial.print("  ");
+    // Serial.println(isTimerRightDumpTriggered);
 
     if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
       triggerFunctionsNonBlockingLeftDump();
@@ -194,14 +202,14 @@ void loop() {
       triggerFunctionsNonBlockingRightDump();
     }
 
-    drive(dataToReceive.xAxis, dataToReceive.yAxis);
+    //drive(dataToReceive.xAxis, dataToReceive.yAxis);
   }
 
   else {
     //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
   }
-  //Serial.print("Battery level = ");
- // Serial.println(analogRead(batteryPin));
+  //  Serial.print("Battery level = ");
+  //  Serial.println(analogRead(batteryPin));
    
   // //Sonar
    processSonar();
@@ -212,9 +220,10 @@ void loop() {
 
   //GPS
   processGps();
-
+//Fake data
   // uint temp1 = round(48.5641198489998198156 *10000000);
   // uint temp2 = round(17.6519512951981595195 *10000000);
+
   //  dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
   // //  dataToSend.actualGpsPositionLat1 = 2;
   //  dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
@@ -230,6 +239,10 @@ void loop() {
   //  Serial.print(dataToSend.actualGpsPositionLon2);
   //  Serial.print(" ");
   //  Serial.println(dataToSend.NumOfSats);
+
+  // uint32_t lattitude = 485641198;
+  // double rLat = lattitude;
+  // Serial.println(rLat);
 
   // Serial.println(dataToSend.actualGpsPositionLat);
   // Serial.println(dataToSend.actualGpsPositionLon);
@@ -282,6 +295,7 @@ void sendDataToArduino() {
   radio.stopListening();
   dataToSend.sonarDistance = previousDistance;  // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
   dataToSend.sonarFIshFoundNum = fishCount;
+  dataToSend.batteryTeensy = map(((analogRead(batteryPin) * (3.3/1024)) * (1000+3000)/1000),11.1,12.6,0,100);
   // int sss = 2;
   // dataToSend.actualGpsPositionLat1 = previousDistance;
   // dataToSend.actualGpsPositionLat = 
