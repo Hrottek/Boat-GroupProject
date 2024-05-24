@@ -73,13 +73,18 @@ struct commandData {
   bool returnHome; //return Home if needed
 };
 
-struct SensorData{
-  int16_t sonarDistance;
-  int16_t sonarFIshFoundNum;
-  double actualGpsPositionLon;
-  double actualGpsPositionLat;
-  int16_t NumOfSats;
+#pragma pack(push, 1)
+struct SensorData {
+  uint16_t sonarDistance;
+  uint8_t sonarFIshFoundNum;
+  uint16_t actualGpsPositionLon1;
+  uint16_t actualGpsPositionLon2;
+  uint16_t actualGpsPositionLat1;
+  uint16_t actualGpsPositionLat2;
+  uint8_t NumOfSats;
+  bool coldStart;
 };
+#pragma pack(pop)
 
 SensorData dataReceived;
 commandData dataToSend;
@@ -199,9 +204,13 @@ digitalWrite(TFT_CS, HIGH);
       Serial.print("  ");
       Serial.print(dataReceived.sonarFIshFoundNum);
       Serial.print("  ");
-      Serial.print(dataReceived.actualGpsPositionLat);
+      Serial.print(dataReceived.actualGpsPositionLat1);
       Serial.print("  ");
-      Serial.print(dataReceived.actualGpsPositionLon);
+      Serial.print(dataReceived.actualGpsPositionLat2);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLon1);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLon2);
       Serial.print("  ");
       Serial.println(dataReceived.NumOfSats);
     }

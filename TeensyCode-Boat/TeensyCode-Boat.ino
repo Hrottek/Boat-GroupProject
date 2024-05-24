@@ -40,13 +40,18 @@ struct commandData {
   bool returnHome;       //return Home if needed
 };
 
+#pragma pack(push, 1)
 struct SensorData {
-  int16_t sonarDistance;
-  int16_t sonarFIshFoundNum;
-  double actualGpsPositionLon;
-  double actualGpsPositionLat;
-  int16_t NumOfSats;
+  uint16_t sonarDistance;
+  uint8_t sonarFIshFoundNum;
+  uint16_t actualGpsPositionLon1;
+  uint16_t actualGpsPositionLon2;
+  uint16_t actualGpsPositionLat1;
+  uint16_t actualGpsPositionLat2;
+  uint8_t NumOfSats;
+  bool coldStart;
 };
+#pragma pack(pop)
 
 SensorData dataToSend;
 commandData dataToReceive;
@@ -200,13 +205,34 @@ void loop() {
    
   // //Sonar
    processSonar();
-   Serial.println(dataToSend.actualGpsPositionLat,10);
-   Serial.println(dataToSend.actualGpsPositionLon,10);
-   Serial.println(dataToSend.NumOfSats);
+  //  Serial.println(dataToSend.actualGpsPositionLat,10);
+  //  Serial.println(dataToSend.actualGpsPositionLon,10);
+  //  Serial.println(dataToSend.NumOfSats);
    // Sonar END
 
   //GPS
   processGps();
+
+  // uint temp1 = round(48.5641198489998198156 *10000000);
+  // uint temp2 = round(17.6519512951981595195 *10000000);
+  //  dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
+  // //  dataToSend.actualGpsPositionLat1 = 2;
+  //  dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
+  // //  dataToSend.actualGpsPositionLat2 = 41189;
+  // dataToSend.actualGpsPositionLon1 = round(temp2 / 100000);
+  // dataToSend.actualGpsPositionLon2 = round(temp2 % 100000);
+  // Serial.print(dataToSend.actualGpsPositionLat1);
+  //  Serial.print(" ");
+  // Serial.print(dataToSend.actualGpsPositionLat2);
+  // Serial.print(" ");
+  //  Serial.print(dataToSend.actualGpsPositionLon1);
+  //  Serial.print(" ");
+  //  Serial.print(dataToSend.actualGpsPositionLon2);
+  //  Serial.print(" ");
+  //  Serial.println(dataToSend.NumOfSats);
+
+  // Serial.println(dataToSend.actualGpsPositionLat);
+  // Serial.println(dataToSend.actualGpsPositionLon);
   //GPS ENd
 
 sendDataToArduino(); 
@@ -256,6 +282,8 @@ void sendDataToArduino() {
   radio.stopListening();
   dataToSend.sonarDistance = previousDistance;  // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
   dataToSend.sonarFIshFoundNum = fishCount;
+  // int sss = 2;
+  // dataToSend.actualGpsPositionLat1 = previousDistance;
   // dataToSend.actualGpsPositionLat = 
   // dataToSend.actualGpsPositionLon = 
   //Serial.println("Sending");
@@ -430,11 +458,11 @@ void processSonar() {
     //int duration = 20;
     int distance = duration / 58;  //air
     // int distance = duration / 250;  //water
-    Serial.print("Distance: ");
-    Serial.print(distance);
-    Serial.print(" cm  ");
-    Serial.print("Fish Count: ");
-      Serial.println(fishCount);
+    // Serial.print("Distance: ");
+    // Serial.print(distance);
+    // Serial.print(" cm  ");
+    // Serial.print("Fish Count: ");
+    //   Serial.println(fishCount);
   
 
     if (previousDistance != -1 && previousDistance - distance > previousDistance * 0.3) {
@@ -543,8 +571,10 @@ void processGps() {
         currentMillis = millis();
         if(currentMillis - gps_previousMillis2 > 5000 && gps_hasCorrectData){
           Serial.println("We here");
-          dataToSend.actualGpsPositionLat = 0;
-          dataToSend.actualGpsPositionLon = 0;
+          dataToSend.actualGpsPositionLat1 = 0;
+          dataToSend.actualGpsPositionLon1 = 0;
+          dataToSend.actualGpsPositionLat2 = 0;
+          dataToSend.actualGpsPositionLon2 = 0;
           dataToSend.NumOfSats = 0;
           gps_hasCorrectData = 0;
       }
@@ -562,14 +592,21 @@ void processGps() {
     double temp = getNewestLat();
     Serial.print(temp,10);
     Serial.print(", ");
-    dataToSend.actualGpsPositionLat = temp;
+    //dataToSend.actualGpsPositionLat = temp;
     temp = getNewestLng();
     Serial.print(temp,10);
     Serial.print(", ");
-    dataToSend.actualGpsPositionLon = temp;
+    //dataToSend.actualGpsPositionLon = temp;
     dataToSend.NumOfSats = gps_satelite_number;
     Serial.print(", ");
     Serial.println(gps_satelite_number);
+
+    uint temp1 = round(getNewestLat() * 10000000);
+    uint temp2 = round(getNewestLng() *10000000);
+    dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
+    dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
+    dataToSend.actualGpsPositionLon1 = round(temp2 / 100000);
+    dataToSend.actualGpsPositionLon2 = round(temp2 % 100000);
     //gps_dataAvailable = 0;
   }
 }
