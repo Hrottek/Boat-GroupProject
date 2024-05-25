@@ -39,7 +39,7 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 enum DisplayScreens {
     NONE = 0,
-    ERROR_SCREEN = -1,
+    ERROR_NO_RADIO_CONNECTION = -1,
     ERROR_NOT_ENOUGH_SATELLITES = -2,
     GPS_SCREEN = 1,
     SONAR_SCREEN = 2
@@ -151,7 +151,7 @@ void loop() {
   //SPI.beginTransaction(settingsDevice1);
 
   unsigned long currentTime = millis();
-  bool radioAvailable = true;  
+  bool radioAvailable = true;
 
   if (isSending && currentTime - lastSwitchTime > sendingDuration) {
     // After sending for 1 second, switch to listening mode
@@ -427,14 +427,14 @@ void drawMainScreenBackground(uint16_t backgroundColor, DisplayScreens screen) {
   }
 }
 
-void drawErrorScreen(uint8_t error) {
+void drawErrorScreen(DisplayScreens screen) {
   uint16_t rectX = 0;
   uint16_t rectY = 0;
   uint16_t rectWidth = tft.width();
   uint16_t rectHeight = tft.height();
 
-  switch (error) {
-    case 1:
+  switch (screen) {
+    case ERROR_NO_RADIO_CONNECTION:
       /// Fill background
       tft.fillRect(rectX, rectY, rectWidth, rectHeight, ST77XX_BLACK);
       tft.drawRect(rectX, rectY, rectWidth, rectHeight, ST77XX_RED);
@@ -455,7 +455,7 @@ void drawErrorScreen(uint8_t error) {
       tft.setCursor(rectX + 16, rectY + 20 + 80);
       tft.print("NO CONNECTION!");
       break;
-    case 2:
+    case ERROR_NOT_ENOUGH_SATELLITES:
       /// Fill background
       tft.fillRect(rectX, 20, rectWidth, rectHeight, ST77XX_BLACK);
 
@@ -464,11 +464,11 @@ void drawErrorScreen(uint8_t error) {
 
       /// Display error message
       tft.setTextColor(ST77XX_RED);
-      tft.setTextSize(1);
+      tft.setTextSize(2);
 
-      tft.setCursor(rectX + 64, rectY + 60);  
+      tft.setCursor(rectX + 10, rectY + 60);  
       tft.print("NOT ENOUGH SATELLITES!");
-      tft.setCursor(rectX + 64, rectY + 20 + 80);
+      tft.setCursor(rectX + 24, rectY + 20 + 80);
       tft.print("USE MANUAL CONTROL!");
       break;
   }
@@ -828,12 +828,12 @@ void updateDisplay(bool connected, struct DisplayState *state) {
     } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_NOT_ENOUGH_SATELLITES) {
       state->currentScreen = ERROR_NOT_ENOUGH_SATELLITES;
       updateTopBarBackground();
-      drawErrorScreen(2);
+      drawErrorScreen(ERROR_NOT_ENOUGH_SATELLITES);
     }
 
-  } else if (!connected && state->currentScreen != ERROR_SCREEN) {
-    state->currentScreen = ERROR_SCREEN;
-    drawErrorScreen(1);    
+  } else if (!connected && state->currentScreen != ERROR_NO_RADIO_CONNECTION) {
+    state->currentScreen = ERROR_NO_RADIO_CONNECTION;
+    drawErrorScreen(ERROR_NO_RADIO_CONNECTION);    
   } 
 }
 
