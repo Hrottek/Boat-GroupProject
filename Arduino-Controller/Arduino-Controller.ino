@@ -720,17 +720,22 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
   }
 
   uint8_t confirmButtonState = digitalRead(DISPLAY_BUTTON_CONFIRM);
-  unsigned long display_interval = 100000;
+  unsigned long display_interval = 100*1000;
 
   const uint16_t SEND_TIME = 1*1000;
-  const uint16_t SAVE_TIME = 3*1000;
-  const uint16_t DELETE_TIME = 7*1000;  
+  const uint16_t SAVE_TIME = 2*1000;
+  const uint16_t DELETE_TIME = 3*1000;  
+  const uint16_t CYCLE_ACTIONS_TIME = 4*1000;
 
   /// Visualization ----------------
   if (state->holdingConfirmButton == true && confirmButtonState == LOW) { // Ak sa drzi tlacidlo
-    display_interval = millis() - display_previousMillis;    
+    display_interval = millis() - display_previousMillis;
+    if (display_interval > CYCLE_ACTIONS_TIME) {
+      display_previousMillis = millis();
+    }
+
     /// SEND TO POS action
-    if (display_interval < SEND_TIME) { 
+    if (display_interval <= SEND_TIME) { 
       tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_GREEN);
     }
     /// SAVING Action
@@ -754,11 +759,11 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
     display_interval = millis() - display_previousMillis;
     drawMainScreenGps();
     
-    if (display_interval < SEND_TIME) { /// SEND TO POS Action
+    if (display_interval <= SEND_TIME) { /// SEND TO POS Action
       // TODO: Code for sending position to boat
       Serial.println("Sent coords to boat!");
 
-    } else if (display_interval <= SAVE_TIME) { /// SAVE Action
+    } else if (display_interval > SEND_TIME && display_interval <= SAVE_TIME) { /// SAVE Action
       gpsPositionData.longitudes[currentGpsSelection->position-1] = 42.1; // TODO: dataReceived.actualGpsPositionLon;
       gpsPositionData.latitudes[currentGpsSelection->position-1] = 32; // TODO: dataReceived.actualGpsPositionLat;
       gpsPositionData.empty[currentGpsSelection->position-1] = false;
@@ -766,7 +771,7 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
       Serial.println("Saved position: empty: ");
       Serial.println(gpsPositionData.empty[currentGpsSelection->position-1]);
 
-    } else if (display_interval <= DELETE_TIME) { /// DELETE Action
+    } else if (display_interval > SAVE_TIME && display_interval <= DELETE_TIME) { /// DELETE Action
       gpsPositionData.longitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.latitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.empty[currentGpsSelection->position-1] = true;
