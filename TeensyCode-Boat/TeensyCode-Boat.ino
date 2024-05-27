@@ -207,7 +207,8 @@ void loop() {
 
     desiredLat = concatenateDigitsString(dataToReceive.gpsGoToPosLat1, dataToReceive.gpsGoToPosLat2);
     desiredLon = concatenateDigitsString(dataToReceive.gpsGoToPosLon1, dataToReceive.gpsGoToPosLon2);
-
+    desiredLat = desiredLat / 10000000;
+    desiredLon = desiredLon / 10000000;
     drive(dataToReceive.xAxis, dataToReceive.yAxis);
   }
 
