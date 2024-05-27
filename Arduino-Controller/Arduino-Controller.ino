@@ -74,7 +74,9 @@ struct DisplayGpsPositionData gpsPositionData;
 uint16_t displayLakeFloorBuffer[DISPLAY_WIDTH - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN];
 uint16_t displaySonarDrawIndex;
 
-unsigned long display_previousMillis = 0UL;
+unsigned long display_previousMillis = 0;
+unsigned long display_sonarPreviousMillis = 0;
+bool updateSonar;
 
 /// Nfrc and i/o data
 struct commandData {
@@ -577,12 +579,23 @@ void updateMainScreenGpsValues() {
   }
 }
 
-void updateMainScreenSonarValues() {  
-  float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
-  //float sonarData = dataReceived.sonarDistance;
+void updateMainScreenSonarValues() {
 
-  // Draw fish finder point based on sonar data
-  drawFishFinder(sonarData, 1);
+  if(!updateSonar) {
+    display_sonarPreviousMillis = millis();
+    updateSonar = true;
+  }
+
+  unsigned long sonarInterval = millis() - display_sonarPreviousMillis;
+
+  if (sonarInterval > 1*1000) {
+    float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
+    //float sonarData = dataReceived.sonarDistance;
+
+    // Draw fish finder point based on sonar data
+    drawFishFinder(sonarData, 1);
+    updateSonar = false;
+  }
 
   uint16_t rectX = 20 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
   uint16_t rectY = 40;
@@ -822,7 +835,7 @@ void updateDisplay(bool connected, struct DisplayState *state) {
       if (state->currentScreen == GPS_SCREEN) {
         updateMainScreenGpsValues();
       } else if (state->currentScreen == SONAR_SCREEN) {
-        updateMainScreenSonarValues();      
+        updateMainScreenSonarValues();
       }
 
     } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_NOT_ENOUGH_SATELLITES) {
@@ -886,7 +899,9 @@ void initDisplay(DisplayScreens defaultScreen) {
     gpsPositionData.empty[i] = true;
     gpsPositionData.latitudes[i] = 0;
     gpsPositionData.longitudes[i] = 0;
-  }  
+  }
+
+  updateSonar = false;
 
   switch(defaultScreen) {
     case GPS_SCREEN:
