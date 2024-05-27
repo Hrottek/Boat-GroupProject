@@ -22,6 +22,7 @@
 
 #define DISPLAY_BUTTON_WIDTH  180
 #define DISPLAY_BUTTON_HEIGHT 30
+
 #define DISPLAY_TOP_BAR_COLOR ST77XX_BLACK
 #define DISPLAY_MENU_BAR_COLOR ST77XX_BLACK
 #define DISPLAY_MENU_BAR_BUTTON_COLOR ST77XX_WHITE
@@ -29,7 +30,7 @@
 #define DISPLAY_MAIN_SCREEN_OUTLINE_COLOR ST77XX_WHITE
 #define DISPLAY_SONAR_DATA_COLOR ST77XX_BLUE
 
-// Battery icon colors
+/// Battery icon colors
 #define DISPLAY_BATTERY_BODY_COLOR ST77XX_WHITE
 #define DISPLAY_BATTERY_BORDER_COLOR ST77XX_BLACK
 
@@ -79,23 +80,46 @@ unsigned long display_sonarPreviousMillis = 0;
 bool updateSonar;
 
 /// Nfrc and i/o data
+#pragma pack(push, 1)
 struct commandData {
   int16_t xAxis;
   int16_t yAxis;
   int16_t leftDump;
   int16_t rightDump;
-  double gpsGoToPosLat;
-  double gpsGoToPosLon; //Ak su 0 tak nechod ak sa zmenia tak chod
-  bool returnHome; //return Home if needed
+  uint16_t gpsGoToPosLat1;
+  uint16_t gpsGoToPosLat2;
+  uint16_t gpsGoToPosLon1;  //Ak su 0 tak nechod ak sa zmenia tak chod
+  uint16_t gpsGoToPosLon2;
+  bool returnHome;       //return Home if needed
 };
 
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 struct SensorData {
-  int16_t sonarDistance;
-  int16_t sonarFIshFoundNum;
-  double actualGpsPositionLon;
-  double actualGpsPositionLat;
-  int16_t NumOfSats;
+  uint16_t sonarDistance;
+  uint8_t sonarFIshFoundNum;
+  uint16_t actualGpsPositionLon1;
+  uint16_t actualGpsPositionLon2;
+  uint16_t actualGpsPositionLat1;
+  uint16_t actualGpsPositionLat2;
+  uint8_t NumOfSats;
+  bool coldStart;
+  uint8_t batteryTeensy;
 };
+#pragma pack(pop)
+
+SensorData dataReceived;
+commandData dataToSend;
+
+const int pinDriveYAxis = A1;
+const int pinDriveXAxis = A0;
+const int pinDumpLeft = A2;   //normally 7
+const int pinDumpRight = A3;  //normally 8
+//const int pinBattery = A17;
+
+uint32_t rLat = 0;
+uint32_t rLon = 0;
 
 SensorData dataReceived;
 commandData dataToSend;
@@ -107,20 +131,20 @@ const int pinDumpRight = A3; //normally 8
 
 bool firstInitTime = false;
 
-bool isSending = true; // Start in sending mode
-unsigned long lastSwitchTime = 0; // Last time we switched mode
-const unsigned long sendingDuration = 1000; // Send data for 1 second
-bool awaitingData = false; // Flag to indicate awaiting reception of one data packet
+bool isSending = true;                       // Start in sending mode
+unsigned long lastSwitchTime = 0;            // Last time we switched mode
+const unsigned long sendingDuration = 1000;  // Send data for 1 second
+bool awaitingData = false;                   // Flag to indicate awaiting reception of one data packet
 
 //pins for NRF24L01
-const int pinCE = 6; // 9 normally
-const int pinCSN = 7; //10 normally
+const int pinCE = 6;   // 9 normally
+const int pinCSN = 7;  //10 normally
 
-RF24 radio(pinCE, pinCSN); // CE, CSN pins configuration
-const byte addresses[][6] = {"1Node", "2Node"};
+RF24 radio(pinCE, pinCSN);  // CE, CSN pins configuration
+const byte addresses[][6] = { "1Node", "2Node" };
 
-SPISettings settingsDevice1(4000000, MSBFIRST, SPI_MODE0); // Example settings for device 1
-SPISettings settingsDevice2(2000000, MSBFIRST, SPI_MODE1); // Example settings for device 2
+SPISettings settingsDevice1(4000000, MSBFIRST, SPI_MODE0);  // Example settings for device 1
+SPISettings settingsDevice2(2000000, MSBFIRST, SPI_MODE1);  // Example settings for device 2
 
 void setup() {
   Serial.begin(9600);
@@ -129,7 +153,7 @@ void setup() {
   radio.setPALevel(RF24_PA_MIN);
   radio.openWritingPipe(addresses[0]);
   radio.openReadingPipe(1, addresses[1]);
-  radio.startListening(); // Start in listening mode to be ready to switch to sending mode
+  radio.startListening();  // Start in listening mode to be ready to switch to sending mode
   Serial.println("Arduino is ready");
 
   pinMode(pinDumpLeft, INPUT);
@@ -142,10 +166,10 @@ void setup() {
 
 void loop() {
 
-  if(!firstInitTime) {
+  if (!firstInitTime) {
     lastSwitchTime = millis();
     firstInitTime = true;
-  }    
+  }
 
   digitalWrite(pinCSN, LOW);
   SPI.endTransaction();
@@ -161,44 +185,115 @@ void loop() {
     awaitingData = true;
     radio.startListening();
     //digitalWrite(pinCSN, LOW);
-    lastSwitchTime = currentTime; // Update the switch time
+    lastSwitchTime = currentTime;  // Update the switch time
     Serial.println("Switching to listening mode...");
   }
 
   if (isSending) {
     // Create some data to send
-    
     dataToSend.yAxis = analogRead(pinDriveYAxis);
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
     dataToSend.rightDump = digitalRead(pinDumpRight);
     //Serial.println(dataToSend.yAxis);
-    radio.stopListening(); // Ensure we're not in listening mode
-    radio.write(&dataToSend, sizeof(dataToSend)); // Send data
+
+    radio.stopListening();                         // Ensure we're not in listening mode
+    radio.write(&dataToSend, sizeof(dataToSend));  // Send data
 
     digitalWrite(pinCSN, HIGH);
-    SPI.endTransaction(); 
+    SPI.endTransaction();
 
-    //delay(20);  
+
+    //delay(20);
+    digitalWrite(TFT_CS, LOW);
+    SPI.beginTransaction(settingsDevice2);
+    //delay(100);
+
+    bool connected = true;  // hodnotu by som bral z nejakej get funkcie
+    updateDisplay(connected, displayState);
+    digitalWrite(TFT_CS, HIGH);
+    SPI.endTransaction();
+
     //Serial.println("Sending data...");
-   // delay(10); // Small delay to avoid spamming too fast
+    // delay(10); // Small delay to avoid spamming too fast
   }
 
   // Listen for one piece of data and switch back to sending
   if (!isSending && awaitingData) {
-    
+
     if (radio.available()) {
-      
       radio.read(&dataReceived, sizeof(dataReceived));
-      awaitingData = false; // Reset flag after receiving data
-      isSending = true; // Switch back to sending mode
-      lastSwitchTime = millis(); // Update the switch time
+      awaitingData = false;       // Reset flag after receiving data
+      isSending = true;           // Switch back to sending mode
+      lastSwitchTime = millis();  // Update the switch time
       Serial.print(dataReceived.sonarDistance);
       Serial.print("  ");
-      Serial.println(dataReceived.sonarFIshFoundNum);
-      radioAvailable = true;
+      Serial.print(dataReceived.sonarFIshFoundNum);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLat1);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLat2);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLon1);
+      Serial.print("  ");
+      Serial.print(dataReceived.actualGpsPositionLon2);
+      Serial.print("  ");
+      Serial.print(dataReceived.batteryTeensy);
+      Serial.print("  ");
+      Serial.println(dataReceived.NumOfSats);
+
+      uint32_t reconstructedLattitude1 = 0;
+      uint32_t reconstructedLattitude2 = 0;
+      uint32_t reconstructedLongtitude1 = 0;
+      uint32_t reconstructedLongtitude2 = 0;
+
+      for (int l = 0; l < 4; l++) {
+        //Serial.println(size(dataReceived.actualGpsPositionLat1));
+        String str = String(dataReceived.actualGpsPositionLat1);
+        char c = str[l];
+        int tempC = c - '0';
+        if (l > 0)
+          reconstructedLattitude1 = concatenateDigitsString(reconstructedLattitude1, tempC);
+        else
+          reconstructedLattitude1 = tempC;
+      }
+
+      for (int l = 0; l < 5; l++) {
+        String str = String(dataReceived.actualGpsPositionLat2);
+        char c = str[l];
+        int tempC = c - '0';
+        if (l > 0)
+          reconstructedLattitude2 = concatenateDigitsString(reconstructedLattitude2, tempC);
+        else
+          reconstructedLattitude2 = concatenateDigitsString(reconstructedLattitude2, tempC);
+      }
+
+      for (int l = 0; l < 4; l++) {
+        //Serial.println(size(dataReceived.actualGpsPositionLat1));
+        String str = String(dataReceived.actualGpsPositionLon1);
+        char c = str[l];
+        int tempC = c - '0';
+        if (l > 0)
+          reconstructedLongtitude1 = concatenateDigitsString(reconstructedLongtitude1, tempC);
+        else
+          reconstructedLongtitude1 = tempC;
+      }
+
+      for (int l = 0; l < 5; l++) {
+        String str = String(dataReceived.actualGpsPositionLon2);
+        char c = str[l];
+        int tempC = c - '0';
+        if (l > 0)
+          reconstructedLongtitude2 = concatenateDigitsString(reconstructedLongtitude2, tempC);
+        else
+          reconstructedLongtitude2 = concatenateDigitsString(reconstructedLongtitude2, tempC);
+      }
+
+      rLat = concatenateDigitsString(reconstructedLattitude1, reconstructedLattitude2);
+      rLon = concatenateDigitsString(reconstructedLongtitude1, reconstructedLongtitude2);
 
     } else {
+
       //TODO Not connected to the boat
       //radioAvailable = false;
     }
@@ -216,7 +311,7 @@ void loop() {
 void drawFishFinder(float sonarData, int lineThickness) {    
     const uint8_t LAKE_FLOOR_HEIGHT = 20;
     const uint8_t TOP_BAR_MARGIN = 40;
-
+  
     // Map sonar data to lake floor Y coordinate within the drawing area
     uint16_t lakeFloorY = map(sonarData, 0, SONAR_MAX_DISTANCE, tft.height() - 2, TOP_BAR_MARGIN);
 
@@ -250,7 +345,7 @@ void drawFishFinder(float sonarData, int lineThickness) {
 // Helper function to determine battery fill color based on charge level
 uint16_t getBatteryFillColor(uint8_t batteryCharge) {
   if (batteryCharge >= 50) {
-    return ST77XX_GREEN;    
+    return ST77XX_GREEN;
   } else if (batteryCharge >= 25) {
     return ST77XX_ORANGE;
   } else if (batteryCharge >= 10) {
@@ -294,12 +389,10 @@ void updateTopBar(bool connected, uint8_t numberOfSatellites, DisplayScreens cur
 
   if (numberOfSatellites < usableNumOfSatellites) {
     tft.setTextColor(ST77XX_MAGENTA); // bieda
-
   } else if (numberOfSatellites < idealNumOfSatellites && numberOfSatellites >= usableNumOfSatellites) {
     tft.setTextColor(ST77XX_ORANGE); // take da sa
-
   } else {
-    tft.setTextColor(ST77XX_GREEN); // dobre
+    tft.setTextColor(ST77XX_GREEN);  // dobre
   }
 
   tft.print("Satellites: ");
@@ -355,7 +448,7 @@ void drawTopBar() {
   tft.setCursor(tft.width() - 56, 2);
   tft.print("Boat: ");
   tft.println();
-  
+
   /// Connection status
   tft.print("Connection: ");
 
@@ -381,7 +474,8 @@ void drawMenuBarWithButtons() {
   tft.drawRect(rectX + 10, rectY + 20, BUTTON_WIDTH, BUTTON_HEIGHT, DISPLAY_MENU_BAR_BUTTON_COLOR);
 
   tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
   tft.print("MENU");
   rectY = rectY + 20 + BUTTON_HEIGHT;
 
@@ -389,7 +483,8 @@ void drawMenuBarWithButtons() {
   tft.drawRect(rectX + 10, rectY + 20, BUTTON_WIDTH, BUTTON_HEIGHT, DISPLAY_MENU_BAR_BUTTON_COLOR);
 
   tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
   tft.print("SELECT");
   rectY = rectY + 20 + BUTTON_HEIGHT;
 
@@ -397,7 +492,8 @@ void drawMenuBarWithButtons() {
   tft.drawRect(rectX + 10, rectY + 20, BUTTON_WIDTH, BUTTON_HEIGHT, DISPLAY_MENU_BAR_BUTTON_COLOR);
 
   tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
   tft.print("CONFIRM");
   rectY = rectY + 20 + BUTTON_HEIGHT;
 
@@ -405,7 +501,8 @@ void drawMenuBarWithButtons() {
   tft.drawRect(rectX + 10, rectY + 20, BUTTON_WIDTH, BUTTON_HEIGHT, DISPLAY_MENU_BAR_BUTTON_COLOR);
 
   tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
   tft.print("HOME");
   tft.setCursor(rectX + 14, rectY + 24 + 8);
   rectY = rectY + 20 + BUTTON_HEIGHT;
@@ -916,3 +1013,19 @@ void initDisplay(DisplayScreens defaultScreen) {
   }
 }
 
+uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
+  // Convert digits to strings
+  String str1 = String(digit1);
+  String str2 = String(digit2);
+
+  // Serial.println(str1);
+  // Serial.println(str2);
+
+  // Concatenate the strings
+  String concatenatedStr = str1 + str2;
+  // Serial.println(concatenatedStr);
+
+  // Convert the concatenated string back to an integer
+  uint32_t concatenatedInt = concatenatedStr.toInt();
+  return concatenatedInt;
+}
