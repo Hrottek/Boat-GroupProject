@@ -62,8 +62,8 @@ struct DisplayState {
 };
 
 struct DisplayGpsPositionData {
-  float longitudes[4];
-  float latitudes[4];
+  uint32_t longitudes[4];
+  uint32_t latitudes[4];
   bool empty[4];
 };
 
@@ -75,9 +75,15 @@ struct DisplayGpsPositionData gpsPositionData;
 uint16_t displayLakeFloorBuffer[DISPLAY_WIDTH - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN];
 uint16_t displaySonarDrawIndex;
 
+const uint16_t DISPLAY_SONAR_DRAW_TIME = 1*1000;
+const uint16_t DISPLAY_SEND_TIME = 1*1000;
+const uint16_t DISPLAY_SAVE_TIME = 2*1000;
+const uint16_t DISPLAY_DELETE_TIME = 3*1000;  
+const uint16_t DISPLAY_CYCLE_ACTIONS_TIME = 4*1000;
+
 unsigned long display_previousMillis = 0;
 unsigned long display_sonarPreviousMillis = 0;
-bool updateSonar;
+bool updateSonar = false;
 
 /// Nfrc and i/o data
 #pragma pack(push, 1)
@@ -121,20 +127,13 @@ const int pinDumpRight = A3;  //normally 8
 uint32_t rLat = 0;
 uint32_t rLon = 0;
 
-SensorData dataReceived;
-commandData dataToSend;
-
-const int pinDriveYAxis = A0;
-const int pinDriveXAxis = A1;
-const int pinDumpLeft = A2; //normally 7
-const int pinDumpRight = A3; //normally 8
-
 bool firstInitTime = false;
 
 bool isSending = true;                       // Start in sending mode
 unsigned long lastSwitchTime = 0;            // Last time we switched mode
 const unsigned long sendingDuration = 1000;  // Send data for 1 second
 bool awaitingData = false;                   // Flag to indicate awaiting reception of one data packet
+bool radioAvailable = true;
 
 //pins for NRF24L01
 const int pinCE = 6;   // 9 normally
@@ -177,7 +176,6 @@ void loop() {
   //SPI.beginTransaction(settingsDevice1);
 
   unsigned long currentTime = millis();
-  bool radioAvailable = true;
 
   if (isSending && currentTime - lastSwitchTime > sendingDuration) {
     // After sending for 1 second, switch to listening mode
@@ -202,18 +200,7 @@ void loop() {
 
     digitalWrite(pinCSN, HIGH);
     SPI.endTransaction();
-
-
-    //delay(20);
-    digitalWrite(TFT_CS, LOW);
-    SPI.beginTransaction(settingsDevice2);
-    //delay(100);
-
-    bool connected = true;  // hodnotu by som bral z nejakej get funkcie
-    updateDisplay(connected, displayState);
-    digitalWrite(TFT_CS, HIGH);
-    SPI.endTransaction();
-
+  
     //Serial.println("Sending data...");
     // delay(10); // Small delay to avoid spamming too fast
   }
@@ -222,6 +209,7 @@ void loop() {
   if (!isSending && awaitingData) {
 
     if (radio.available()) {
+      radioAvailable = true;
       radio.read(&dataReceived, sizeof(dataReceived));
       awaitingData = false;       // Reset flag after receiving data
       isSending = true;           // Switch back to sending mode
@@ -294,11 +282,14 @@ void loop() {
 
     } else {
 
-      //TODO Not connected to the boat
-      //radioAvailable = false;
+      //TODO: Not connected to the boat
+      if (!isSending) {
+        radioAvailable = false;
+      }
     }
-  }
+  }  
 
+  //radioAvailable = true;
   digitalWrite(TFT_CS, LOW);
   SPI.beginTransaction(settingsDevice2);
   //delay(100);  
@@ -409,7 +400,7 @@ void updateTopBar(bool connected, uint8_t numberOfSatellites, DisplayScreens cur
   }
 
   /// Draw battery icons
-  drawBattery(20, 8, 2, tft.width() - 24, 2, 40); // Boat Battery
+  drawBattery(20, 8, 2, tft.width() - 24, 2, dataReceived.batteryTeensy); // Boat Battery
   drawBattery(20, 8, 2, tft.width() - 24, 10, 70); // Joystick Battery  
 
   /// Current Screen
@@ -604,17 +595,10 @@ void updateMainScreenGpsValues() {
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
 
   if (gpsPositionData.empty[0] == true) {
-    tft.print("Lat: EMPTY");
-    tft.print(", Long: EMPTY");
+    tft.print("EMPTY");
 
   } else {
-    tft.print("Lat: ");
-    float latitude = gpsPositionData.latitudes[0]; // tuto by som bral hodnotu z nejakej get funkcie
-    tft.print(latitude);
-
-    tft.print(", Long: ");
-    float longitude = gpsPositionData.longitudes[0];
-    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print("SAVED");
   }
 
   rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
@@ -623,17 +607,10 @@ void updateMainScreenGpsValues() {
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
 
   if (gpsPositionData.empty[1] == true) {
-    tft.print("Lat: EMPTY");
-    tft.print(", Long: EMPTY");
+    tft.print("EMPTY");
 
   } else {
-    tft.print("Lat: ");
-    float latitude = gpsPositionData.latitudes[1]; // tuto by som bral hodnotu z nejakej get funkcie
-    tft.print(latitude);
-
-    tft.print(", Long: ");
-    float longitude = gpsPositionData.longitudes[1];
-    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print("SAVED");
   }
 
   rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
@@ -642,17 +619,10 @@ void updateMainScreenGpsValues() {
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
 
   if (gpsPositionData.empty[2] == true) {
-    tft.print("Lat: EMPTY");
-    tft.print(", Long: EMPTY");
+    tft.print("EMPTY");
 
   } else {
-    tft.print("Lat: ");
-    float latitude = gpsPositionData.latitudes[2]; // tuto by som bral hodnotu z nejakej get funkcie
-    tft.print(latitude);
-
-    tft.print(", Long: ");
-    float longitude = gpsPositionData.longitudes[2];
-    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
+    tft.print("SAVED");
   }
 
   rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
@@ -661,73 +631,66 @@ void updateMainScreenGpsValues() {
   tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);  
 
   if (gpsPositionData.empty[3] == true) {
-    tft.print("Lat: EMPTY");
-    tft.print(", Long: EMPTY");
+    tft.print("EMPTY");
 
   } else {
-    tft.print("Lat: ");
-    float latitude = gpsPositionData.latitudes[3]; // tuto by som bral hodnotu z nejakej get funkcie
-    tft.print(latitude);
-
-    tft.print(", Long: ");
-    float longitude = gpsPositionData.longitudes[3];
-    tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
-    rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+    tft.print("SAVED");
   }
 }
 
 void updateMainScreenSonarValues() {
-
-  if(!updateSonar) {
+  if (!updateSonar) {
     display_sonarPreviousMillis = millis();
     updateSonar = true;
   }
 
   unsigned long sonarInterval = millis() - display_sonarPreviousMillis;
 
-  if (sonarInterval > 1*1000) {
-    float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
-    //float sonarData = dataReceived.sonarDistance;
+  if (sonarInterval >= DISPLAY_SONAR_DRAW_TIME) {
+    //float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data)
+    float sonarData = 610 - dataReceived.sonarDistance;
 
     // Draw fish finder point based on sonar data
-    drawFishFinder(sonarData, 1);
+    drawFishFinder(sonarData, 2);
     updateSonar = false;
-  }
 
-  uint16_t rectX = 20 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectY = 40;
-  uint16_t rectWidth = tft.width();
-  uint16_t rectHeight = tft.height() - 20;
+    uint16_t rectX = 20 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
+    uint16_t rectY = 40;
+    uint16_t rectWidth = tft.width();
+    uint16_t rectHeight = tft.height() - 20;
 
-  const uint8_t NUM_POINTS = 5;
-  const uint8_t POINT_VALUES[NUM_POINTS] = {25, 50, 75, 100, 0};  // Values to map
-  uint16_t lakeFloorY[NUM_POINTS];  // Array to store mapped Y coordinates
+    const uint8_t NUM_POINTS = 5;
+    const uint8_t POINT_VALUES[NUM_POINTS] = {25, 50, 75, 100, 0};  // Values to map
+    uint16_t lakeFloorY[NUM_POINTS];  // Array to store mapped Y coordinates
 
-  // Calculate mapped Y coordinates for each point
-  for (int i = 0; i < NUM_POINTS; i++) {
-      lakeFloorY[i] = map(POINT_VALUES[i], 0, 100, rectHeight, rectY);
-  }
+    // Calculate mapped Y coordinates for each point
+    for (int i = 0; i < NUM_POINTS; i++) {
+        lakeFloorY[i] = map(POINT_VALUES[i], 0, 100, rectHeight, rectY);
+    }
 
-  // Draw lines for each mapped Y coordinate
-  for (int i = 0; i < NUM_POINTS; i++) {
-      tft.drawLine(rectX - 5, lakeFloorY[i], rectX + 5, lakeFloorY[i], ST77XX_WHITE);
-  }
+    // Draw lines for each mapped Y coordinate
+    for (int i = 0; i < NUM_POINTS; i++) {
+        tft.drawLine(rectX - 5, lakeFloorY[i], rectX + 5, lakeFloorY[i], ST77XX_WHITE);
+    }
 
-  // Draw a vertical line on the left side of the display
-  tft.drawLine(rectX, rectY, rectX, rectHeight, ST77XX_WHITE);  
+    // Draw a vertical line on the left side of the display
+    tft.drawLine(rectX, rectY, rectX, rectHeight, ST77XX_WHITE);  
 
-  tft.setCursor(4 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN, tft.height() - 10);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(1);
+    tft.setCursor(4 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN, tft.height() - 10);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(1);
 
-  tft.print(SONAR_MAX_DISTANCE);
-  tft.print(" cm");
+    tft.print(SONAR_MAX_DISTANCE);
+    tft.print(" cm");
 
-  int16_t numberOfFish = dataReceived.sonarFIshFoundNum;
-  tft.setCursor(tft.width() - 40, 24);
-  tft.print("Fish: "); 
-  tft.setCursor(tft.width() - 40, 32);
-  tft.print(numberOfFish);
+    /// Fish number
+    tft.fillRect(tft.width() - 45, 32, 20, 10, ST77XX_BLACK); // Clear number
+    uint8_t numberOfFish = dataReceived.sonarFIshFoundNum;
+    tft.setCursor(tft.width() - 40, 24);
+    tft.print("Fish: "); 
+    tft.setCursor(tft.width() - 40, 32);
+    tft.print(numberOfFish);
+  }  
 }
 
 void drawMainScreenSonar() {
@@ -832,28 +795,23 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
   uint8_t confirmButtonState = digitalRead(DISPLAY_BUTTON_CONFIRM);
   unsigned long display_interval = 100*1000;
 
-  const uint16_t SEND_TIME = 1*1000;
-  const uint16_t SAVE_TIME = 2*1000;
-  const uint16_t DELETE_TIME = 3*1000;  
-  const uint16_t CYCLE_ACTIONS_TIME = 4*1000;
-
   /// Visualization ----------------
   if (state->holdingConfirmButton == true && confirmButtonState == LOW) { // Ak sa drzi tlacidlo
     display_interval = millis() - display_previousMillis;
-    if (display_interval > CYCLE_ACTIONS_TIME) {
+    if (display_interval > DISPLAY_CYCLE_ACTIONS_TIME) {
       display_previousMillis = millis();
     }
 
     /// SEND TO POS action
-    if (display_interval <= SEND_TIME) { 
+    if (display_interval <= DISPLAY_SEND_TIME) { 
       tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_GREEN);
     }
     /// SAVING Action
-    if (display_interval > SEND_TIME && display_interval <= SAVE_TIME) {         
+    if (display_interval > DISPLAY_SEND_TIME && display_interval <= DISPLAY_SAVE_TIME) {         
       tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_BLUE);
     }
     /// DELETE Action
-    if (display_interval > SAVE_TIME && display_interval <= DELETE_TIME) {
+    if (display_interval > DISPLAY_SAVE_TIME && display_interval <= DISPLAY_DELETE_TIME) {
       tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_RED);
     }    
   }
@@ -869,16 +827,16 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
     display_interval = millis() - display_previousMillis;
     drawMainScreenGps();
     
-    if (display_interval <= SEND_TIME) { /// SEND TO POS Action
+    if (display_interval <= DISPLAY_SEND_TIME) { /// SEND TO POS Action
       // TODO: Code for sending position to boat
       Serial.println("Sent coords to boat!");
 
-    } else if (display_interval > SEND_TIME && display_interval <= SAVE_TIME) { /// SAVE Action
-      gpsPositionData.longitudes[currentGpsSelection->position-1] = 42.1; // TODO: dataReceived.actualGpsPositionLon;
-      gpsPositionData.latitudes[currentGpsSelection->position-1] = 32; // TODO: dataReceived.actualGpsPositionLat;
+    } else if (display_interval > DISPLAY_SEND_TIME && display_interval <= DISPLAY_SAVE_TIME) { /// SAVE Action
+      gpsPositionData.longitudes[currentGpsSelection->position-1] = rLon;
+      gpsPositionData.latitudes[currentGpsSelection->position-1] = rLat;
       gpsPositionData.empty[currentGpsSelection->position-1] = false;
 
-    } else if (display_interval > SAVE_TIME && display_interval <= DELETE_TIME) { /// DELETE Action
+    } else if (display_interval > DISPLAY_SAVE_TIME && display_interval <= DISPLAY_DELETE_TIME) { /// DELETE Action
       gpsPositionData.longitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.latitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.empty[currentGpsSelection->position-1] = true;
@@ -915,6 +873,22 @@ void updateDisplay(bool connected, struct DisplayState *state) {
 
   /// Update values ================
   if (connected) {
+
+    if (state->currentScreen == ERROR_NO_RADIO_CONNECTION || state->currentScreen == ERROR_NOT_ENOUGH_SATELLITES) {
+      tft.fillScreen(ST77XX_BLACK);
+      drawTopBar();
+      drawMenuBarWithButtons();
+
+      state->currentScreen = GPS_SCREEN;
+      drawMainScreenGps();
+      currentGpsSelection->position = 1;      
+      currentGpsSelection->rectX = 30 + DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
+      currentGpsSelection->rectY = 40;
+      selectMainScreenGps(currentGpsSelection);
+      currentGpsSelection->nextPos = 2;             
+
+      displaySonarDrawIndex = 0;
+    }
 
     if (screen != state->currentScreen)
       updateTopBarBackground();
@@ -991,8 +965,6 @@ void initDisplay(DisplayScreens defaultScreen) {
     gpsPositionData.latitudes[i] = 0;
     gpsPositionData.longitudes[i] = 0;
   }
-
-  updateSonar = false;
 
   switch(defaultScreen) {
     case GPS_SCREEN:
