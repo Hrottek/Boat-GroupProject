@@ -781,16 +781,10 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
       gpsPositionData.latitudes[currentGpsSelection->position-1] = 32; // TODO: dataReceived.actualGpsPositionLat;
       gpsPositionData.empty[currentGpsSelection->position-1] = false;
 
-      Serial.println("Saved position: empty: ");
-      Serial.println(gpsPositionData.empty[currentGpsSelection->position-1]);
-
     } else if (display_interval > SAVE_TIME && display_interval <= DELETE_TIME) { /// DELETE Action
       gpsPositionData.longitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.latitudes[currentGpsSelection->position-1] = 0;
       gpsPositionData.empty[currentGpsSelection->position-1] = true;
-
-      Serial.println("Deleted position: empty: ");
-      Serial.println(gpsPositionData.empty[currentGpsSelection->position-1]);
     }
 
     /// Reselect ------------
