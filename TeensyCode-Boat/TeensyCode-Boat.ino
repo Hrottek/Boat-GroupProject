@@ -12,6 +12,9 @@
 #define slowSpeed 200  // PWM
 #define fastSpeed 255
 
+double desiredLat = 0;
+double desiredLon = 0;
+
 typedef struct {
   int x;
   int y;
@@ -186,13 +189,13 @@ void loop() {
   //sendDataToArduino();
   if (radio.available()) {
     radio.read(&dataToReceive, sizeof(commandData));
-    // Serial.print(dataToReceive.yAxis);
-    // Serial.print("  ");
-    // Serial.print(dataToReceive.xAxis);
-    // Serial.print("  ");
-    // Serial.print(isTimerLeftDumpTriggered);
-    // Serial.print("  ");
-    // Serial.println(isTimerRightDumpTriggered);
+    Serial.print(dataToReceive.yAxis);
+    Serial.print("  ");
+    Serial.print(dataToReceive.xAxis);
+    Serial.print("  ");
+    Serial.print(isTimerLeftDumpTriggered);
+    Serial.print("  ");
+    Serial.println(isTimerRightDumpTriggered);
 
     if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
       triggerFunctionsNonBlockingLeftDump();
@@ -202,20 +205,19 @@ void loop() {
       triggerFunctionsNonBlockingRightDump();
     }
 
-    //drive(dataToReceive.xAxis, dataToReceive.yAxis);
+    desiredLat = concatenateDigitsString(dataToReceive.gpsGoToPosLat1, dataToReceive.gpsGoToPosLat2);
+    desiredLon = concatenateDigitsString(dataToReceive.gpsGoToPosLon1, dataToReceive.gpsGoToPosLon2);
+
+    drive(dataToReceive.xAxis, dataToReceive.yAxis);
   }
 
   else {
     //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
   }
-  //  Serial.print("Battery level = ");
-  //  Serial.println(analogRead(batteryPin));
+  
    
-  // //Sonar
+   //Sonar
    processSonar();
-  //  Serial.println(dataToSend.actualGpsPositionLat,10);
-  //  Serial.println(dataToSend.actualGpsPositionLon,10);
-  //  Serial.println(dataToSend.NumOfSats);
    // Sonar END
 
   //GPS
@@ -705,3 +707,20 @@ void calculateGPSDistanceAndHeading(){
   // Serial.println(gps_heading_degrees);
 }
 ////////////////GPS END////////////
+
+uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
+  // Convert digits to strings
+  String str1 = String(digit1);
+  String str2 = String(digit2);
+
+  // Serial.println(str1);
+  // Serial.println(str2);
+
+  // Concatenate the strings
+  String concatenatedStr = str1 + str2;
+  // Serial.println(concatenatedStr);
+
+  // Convert the concatenated string back to an integer
+  uint32_t concatenatedInt = concatenatedStr.toInt();
+  return concatenatedInt;
+}

@@ -820,6 +820,13 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
 
     if (display_interval <= DISPLAY_SEND_TIME) {  /// SEND TO POS Action
       // TODO: Code for sending position to boat
+
+    uint32_t temp2 = gpsPositionData.longitudes[currentGpsSelection->position - 1];
+    uint32_t temp1 = gpsPositionData.latitudes[currentGpsSelection->position - 1];
+    dataToSend.gpsGoToPosLat1 = round(temp1 / 100000);
+    dataToSend.gpsGoToPosLat2 = round(temp1 % 100000);
+    dataToSend.gpsGoToPosLon1 = round(temp2 / 100000);
+    dataToSend.gpsGoToPosLon2 = round(temp2 % 100000);
       Serial.println("Sent coords to boat!");
 
     } else if (display_interval > DISPLAY_SEND_TIME && display_interval <= DISPLAY_SAVE_TIME) {  /// SAVE Action
@@ -983,3 +990,4 @@ uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
   uint32_t concatenatedInt = concatenatedStr.toInt();
   return concatenatedInt;
 }
+
