@@ -725,3 +725,57 @@ uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
   uint32_t concatenatedInt = concatenatedStr.toInt();
   return concatenatedInt;
 }
+
+void motors(double distance, double angle, int *pwm_left, int *pwm_right) {
+  double integral_distance = 0.0;
+  double integral_angle = 0.0;
+
+  const double Kp_distance = 2.0; 
+  const double Ki_distance = 0.1; 
+  const double Kp_angle = 1.0;    
+  const double Ki_angle = 0.05;   
+  const double dt = 0.1;          
+
+  if (distance <= 1.5) {
+    *pwm_left = 0;
+    *pwm_right = 0;
+    integral_distance = 0;
+    integral_angle = 0;
+  return;
+  }
+
+  if (angle > 180) 
+  angle -= 360;
+
+  else if (angle < -180) 
+  angle += 360;
+
+
+  integral_distance += distance * dt;
+  integral_angle += angle * dt;
+
+  double P_distance = Kp_distance * distance + Ki_distance * integral_distance;
+  double P_angle = Kp_angle * angle + Ki_angle * integral_angle;
+
+  int base_pwm = (int)(P_distance * 25);
+  if (base_pwm > 255)
+    base_pwm = 255;
+
+  int diff_pwm = (int)(P_angle * 2);
+
+  *pwm_left = base_pwm + diff_pwm;
+  *pwm_right = base_pwm - diff_pwm;
+
+  if(*pwm_left > 255) 
+    *pwm_left = 255;
+
+  else if (*pwm_left < 0) 
+    *pwm_left = 0;
+
+
+  if (*pwm_right > 255) 
+    *pwm_right = 255;
+
+  else if (*pwm_right < 0) 
+    *pwm_right = 0;
+}
