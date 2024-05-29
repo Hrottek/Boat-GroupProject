@@ -22,8 +22,8 @@ typedef struct {
 
 typedef struct {
   bool autonomous;
-  uint32_t distance;
-  uint32_t heading;
+  double distance;
+  double heading;
   double lastDesiredLat;
   double lastDesiredLon;
 } Automat;
@@ -83,6 +83,7 @@ double getNewestLat();
 double getNewestLng();
 void calculateGPSDistance();
 double haversine(double lat1, double lon1, double lat2, double lon2);
+Automat automat;
 
 //static const uint8_t GPS_RXpin = 4;
 //static const uint8_t GPS_TXpin = 3;
@@ -137,8 +138,8 @@ bool isTimerRightDumpTriggered = false;
 // Pin setup for driving and dumping
 const int pinDriveLeftDirection1 = 6;
 const int pinDriveLeftDirection2 = 7;
-const int pinDriveRightDirection1 = 8;
-const int pinDriveRightDirection2 = 27;
+const int pinDriveRightDirection1 = 27;
+const int pinDriveRightDirection2 = 8;
 const int pinDumpLeftDirection1 = 23;
 const int pinDumpLeftDirection2 = 22;
 const int pinDumpRightDirection1 = 21;
@@ -202,7 +203,11 @@ void loop() {
     Serial.print("  ");
     Serial.print(isTimerLeftDumpTriggered);
     Serial.print("  ");
-    Serial.println(isTimerRightDumpTriggered);
+    Serial.print(isTimerRightDumpTriggered);
+    Serial.print("  ");
+    Serial.print(desiredLat,10);
+    Serial.print("  ");
+Serial.println(desiredLon,10);
 
     if (!dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
       triggerFunctionsNonBlockingLeftDump();
@@ -216,12 +221,15 @@ void loop() {
     desiredLon = concatenateDigitsString(dataToReceive.gpsGoToPosLon1, dataToReceive.gpsGoToPosLon2);
     desiredLat = desiredLat / 10000000;
     desiredLon = desiredLon / 10000000;
-    if(desiredLat != Automat.lastDesiredLat || desiredLon != Automat.lastDesiredLon) {
-      Automat.autonomous = true;
+    if(desiredLat != automat.lastDesiredLat || desiredLon != automat.lastDesiredLon) {
+      Serial.println("we here");
+      automat.autonomous = true;
     }
 
-    if(Automat.autonomous) {
-      goToSpecificCoord(desiredLat, desiredLon, getNewestLat, getNewestLng, gps_heading_degrees);
+    if(automat.autonomous) {
+      if(dataToReceive.yAxis>800)
+        automat.autonomous = false;
+      goToSpecificCoord(desiredLat, desiredLon, getNewestLat(), getNewestLng(), gps_heading_degrees);
     }
     else{
       drive(dataToReceive.xAxis, dataToReceive.yAxis);
@@ -344,7 +352,7 @@ void drive(int xData, int yData) {
   int motorPinBL = 0;
   switch (direction) {
     case N:
-      speedL = speed;
+      speedL = speed*0.7;
       speedR = speed;
       motorPinAR = 1;
       motorPinBR = 0;
@@ -490,8 +498,8 @@ void processSonar() {
     previousMillisSonar = currentMillis;
     int duration = measureDistance();
     //int duration = 20;
-    int distance = duration / 58;  //air
-    // int distance = duration / 250;  //water
+    //int distance = duration / 58;  //air
+     int distance = duration / 250;  //water
     // Serial.print("Distance: ");
     // Serial.print(distance);
     // Serial.print(" cm  ");
@@ -621,26 +629,31 @@ void processGps() {
   // }
 
   if(gps_hasCorrectData){
-    Serial.println();
-    Serial.print("Coordinates = ");
+    // Serial.println();
+    // Serial.print("Coordinates = ");
     double temp = getNewestLat();
-    Serial.print(temp,10);
-    Serial.print(", ");
+    // Serial.print(temp,10);
+    // Serial.print(", ");
     //dataToSend.actualGpsPositionLat = temp;
     temp = getNewestLng();
-    Serial.print(temp,10);
-    Serial.print(", ");
+    // Serial.print(temp,10);
+    // Serial.print(", ");
     //dataToSend.actualGpsPositionLon = temp;
     dataToSend.NumOfSats = gps_satelite_number;
-    Serial.print(", ");
-    Serial.println(gps_satelite_number);
+    // Serial.print(", ");
+    // Serial.println(gps_satelite_number);
 
     uint temp1 = round(getNewestLat() * 10000000);
-    uint temp2 = round(getNewestLng() *10000000);
+    uint temp2 = round(getNewestLng() * 10000000);
     dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
     dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
     dataToSend.actualGpsPositionLon1 = round(temp2 / 100000);
     dataToSend.actualGpsPositionLon2 = round(temp2 % 100000);
+    // Serial.print(dataToSend.actualGpsPositionLat1);
+    // Serial.print(dataToSend.actualGpsPositionLat2);
+    // Serial.print("  ");
+    // Serial.print(dataToSend.actualGpsPositionLon1);
+    // Serial.println(dataToSend.actualGpsPositionLon2);
     //gps_dataAvailable = 0;
   }
 }
@@ -755,12 +768,12 @@ void motors(double distance, double angle) {
   const double Ki_angle = 0.05;   
   const double dt = 0.1;          
 
-  if (distance <= 1.5) {
+  if (distance <= 3) {
     pwm_left = 0;
     pwm_right = 0;
     integral_distance = 0;
     integral_angle = 0;
-    Automat.autonomous = false;
+    automat.autonomous = false;
   return;
   }
 
@@ -770,47 +783,77 @@ void motors(double distance, double angle) {
   else if (angle < -180) 
   angle += 360;
 
-
-  integral_distance += distance * dt;
-  integral_angle += angle * dt;
-
-  double P_distance = Kp_distance * distance + Ki_distance * integral_distance;
-  double P_angle = Kp_angle * angle + Ki_angle * integral_angle;
-
-  int base_pwm = (int)(P_distance * 25);
-  if (base_pwm > 255)
-    base_pwm = 255;
-
-  int diff_pwm = (int)(P_angle * 2);
-
-  pwm_left = base_pwm + diff_pwm;
-  pwm_right = base_pwm - diff_pwm;
-
-  if(pwm_left > 255) 
-    pwm_left = 255;
-
-  else if (pwm_left < 0) 
-    pwm_left = 0;
-
-
-  if (pwm_right > 255) 
+  if(angle < 60 && angle > -60) {
+    pwm_left = 200;
     pwm_right = 255;
+  }
 
-  else if (pwm_right < 0) 
-    pwm_right = 0;
-  if(pwm_right>150)
-    digitalWrite(pinDriveRightDirection1, motorPinAR);
-  if(pwm_left>150)
-    digitalWrite(pinDriveLeftDirection1, motorPinAL);
+  if(angle > 60) {
+    pwm_left = 255;
+    pwm_right = 151;
+  }
+
+  if(angle < -60) {
+    pwm_left = 151;
+    pwm_right = 255;
+  }
+
+
+  // integral_distance += distance * dt;
+  // integral_angle += angle * dt;
+
+  // double P_distance = Kp_distance * distance + Ki_distance * integral_distance;
+  // double P_angle = Kp_angle * angle + Ki_angle * integral_angle;
+
+  // int base_pwm = (int)(P_distance * 25);
+  // if (base_pwm > 255)
+  //   base_pwm = 255;
+
+  // int diff_pwm = (int)(P_angle * 2);
+
+  // pwm_left = base_pwm + diff_pwm;
+  // pwm_right = base_pwm - diff_pwm;
+
+  // if(pwm_left > 255) 
+  //   pwm_left = 255;
+
+  // else if (pwm_left < 0) 
+  //   pwm_left = 0;
+
+
+  // if (pwm_right > 255) 
+  //   pwm_right = 255;
+
+  // else if (pwm_right < 0) 
+  //   pwm_right = 0;
+  if(pwm_right>150){
+    digitalWrite(pinDriveRightDirection1, 1);
+    digitalWrite(pinDriveRightDirection2, 0);
+  }
+  else{
+    digitalWrite(pinDriveRightDirection1, 0);
+    digitalWrite(pinDriveRightDirection2, 0);
+  }
+  if(pwm_left>150){
+    digitalWrite(pinDriveLeftDirection1, 1);
+    digitalWrite(pinDriveLeftDirection2, 0);
+  }
+  else{
+    digitalWrite(pinDriveLeftDirection1, 0);
+    digitalWrite(pinDriveLeftDirection2, 0);
+  }
   analogWrite(pinPwmDriveLeft, pwm_left);
   analogWrite(pinPwmDriveRight, pwm_right);
 }
 
-void goToSpecificCoord(uint32_t finalCoorLA, uint32_t finalCoorLO, uint32_t currentCoorLA,uint32_t currentCoorLO, uint16_t GPSheading){
-  Automat.lastDesiredLat = finalCoorLA;
-  Automat.lastDesiredLon = finalCoorLO;
-  Automat.distance = haversine(finalCoorLA,finalCoorRA,finalCoorLO,finalCoorRO);
+void goToSpecificCoord(double finalCoorLA, double finalCoorLO, double currentCoorLA,double currentCoorLO, double GPSheading){
+  automat.lastDesiredLat = finalCoorLA;
+  automat.lastDesiredLon = finalCoorLO;
+  Serial.println(desiredLat,10);
+  Serial.println(currentCoorLA,10);
+  automat.distance = haversine(finalCoorLA,finalCoorLO,currentCoorLA,currentCoorLO);
+  Serial.println(automat.distance,10);
   if (GPSheading != 0)
-      Automat.heading = GPSheading;
-  motors(Automat.distance, Automat.heading);
+      automat.heading = GPSheading;
+  motors(automat.distance, automat.heading);
 }
