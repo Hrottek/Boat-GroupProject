@@ -135,7 +135,7 @@ bool isSending = true;                       // Start in sending mode
 unsigned long lastSwitchTime = 0;            // Last time we switched mode
 const unsigned long sendingDuration = 1000;  // Send data for 1 second
 bool awaitingData = false;                   // Flag to indicate awaiting reception of one data packet
-bool radioAvailable = true;
+bool radioAvailable = false;
 
 //pins for NRF24L01
 const int pinCE = 6;   // 9 normally
@@ -286,7 +286,7 @@ void loop() {
 
       //TODO: Not connected to the boat
       if (!isSending) {
-        //radioAvailable = false;
+        radioAvailable = false;
       }
     }
   }
@@ -866,8 +866,8 @@ void updateDisplay(bool connected, struct DisplayState *state) {
     handleHomeButton(state);
   }
 
-  //uint8_t numberOfSatellites = dataReceived.NumOfSats;
-  uint8_t numberOfSatellites = 5;
+  uint8_t numberOfSatellites = dataReceived.NumOfSats;
+  //uint8_t numberOfSatellites = 5;
 
   /// Update values ================
   if (connected) {
