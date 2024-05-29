@@ -1,6 +1,7 @@
 #include <SPI.h>
 #include <nRF24L01.h>
 #include <RF24.h>
+#include <EEPROM.h>
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
@@ -164,6 +165,8 @@ void setup() {
   pinMode(pinCSN, OUTPUT);
   pinMode(TFT_CS, OUTPUT);
 
+
+  retrieveDataFromEEPROM(gpsPositionData);
   initDisplay(GPS_SCREEN);
 }
 
@@ -836,6 +839,8 @@ void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionD
     dataToSend.gpsGoToPosLat2 = round(temp1 % 100000);
     dataToSend.gpsGoToPosLon1 = round(temp2 / 100000);
     dataToSend.gpsGoToPosLon2 = round(temp2 % 100000);
+    // Store the data in EEPROM
+    storeDataInEEPROM(gpsPositionData);
       Serial.println("Sent coords to boat!");
 
     } else if (display_interval > DISPLAY_SEND_TIME && display_interval <= DISPLAY_SAVE_TIME) {  /// SAVE Action
@@ -1005,5 +1010,49 @@ uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
   // Convert the concatenated string back to an integer
   uint32_t concatenatedInt = concatenatedStr.toInt();
   return concatenatedInt;
+}
+
+void storeDataInEEPROM(const DisplayGpsPositionData &data) {
+  int address = 0;
+  
+  // Store longitudes
+  for (int i = 0; i < 4; i++) {
+    EEPROM.put(address, data.longitudes[i]);
+    address += sizeof(data.longitudes[i]);
+  }
+
+  // Store latitudes
+  for (int i = 0; i < 4; i++) {
+    EEPROM.put(address, data.latitudes[i]);
+    address += sizeof(data.latitudes[i]);
+  }
+
+  // Store empty flags
+  for (int i = 0; i < 4; i++) {
+    EEPROM.put(address, data.empty[i]);
+    address += sizeof(data.empty[i]);
+  }
+}
+
+void retrieveDataFromEEPROM(DisplayGpsPositionData &data) {
+  int address = 0;
+
+  // Retrieve longitudes
+  for (int i = 0; i < 4; i++) {
+    EEPROM.get(address, data.longitudes[i]);
+    address += sizeof(data.longitudes[i]);
+  }
+
+  // Retrieve latitudes
+  for (int i = 0; i < 4; i++) {
+    EEPROM.get(address, data.latitudes[i]);
+    address += sizeof(data.latitudes[i]);
+  }
+
+  // Retrieve empty flags
+  for (int i = 0; i < 4; i++) {
+    EEPROM.get(address, data.empty[i]);
+    address += sizeof(data.empty[i]);
+  }
 }
 
