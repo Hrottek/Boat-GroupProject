@@ -204,7 +204,7 @@ void loop() {
     dataToSend.rightDump = digitalRead(pinDumpRight);
 
     if(dataToSend.returnHome){
-      if(milis() - previousMilisReturnHome > 3000){
+      if(millis() - previousMilisReturnHome > 3000){
         dataToSend.returnHome = false;
       }
       
@@ -874,7 +874,7 @@ void handleHomeButton(struct DisplayState *state) {
   if (homeButtonState == LOW && !state->homeButtonPressed) {
     Serial.println("Going home!");
     dataToSend.returnHome = true;
-    previousMilisReturnHome = milis();
+    previousMilisReturnHome = millis();
     state->homeButtonPressed = true;
   } else if (homeButtonState == HIGH) {
     state->homeButtonPressed = false;
