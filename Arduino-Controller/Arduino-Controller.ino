@@ -120,8 +120,8 @@ struct SensorData {
 SensorData dataReceived;
 commandData dataToSend;
 
-const int pinDriveYAxis = A1;
-const int pinDriveXAxis = A0;
+const int pinDriveYAxis = A0;
+const int pinDriveXAxis = A1;
 const int pinDumpLeft = A2;   //normally 7
 const int pinDumpRight = A3;  //normally 8
 //const int pinBattery = A17;
@@ -157,8 +157,8 @@ void setup() {
   radio.startListening();  // Start in listening mode to be ready to switch to sending mode
   Serial.println("Arduino is ready");
 
-  pinMode(pinDumpLeft, INPUT);
-  pinMode(pinDumpRight, INPUT);
+  pinMode(pinDumpLeft, INPUT_PULLUP);
+  pinMode(pinDumpRight, INPUT_PULLUP);
   pinMode(pinCSN, OUTPUT);
   pinMode(TFT_CS, OUTPUT);
 

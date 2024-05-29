@@ -120,9 +120,9 @@ volatile bool echoReceived = false;
 
 
 unsigned long previousMillisLeft = 0;   // Stores last time the functions were triggered
-const long intervalLeft = 1000;         // Interval at which to run the second function (milliseconds)
+const long intervalLeft = 600;         // Interval at which to run the second function (milliseconds)
 unsigned long previousMillisRight = 0;  // Stores last time the functions were triggered
-const long intervalRight = 1000;        // Interval at which to run the second function (milliseconds)
+const long intervalRight = 600;        // Interval at which to run the second function (milliseconds)
 bool isTimerLeftDumpTriggered = false;
 bool isTimerRightDumpTriggered = false;
 
@@ -139,14 +139,20 @@ const int pinPwmDriveLeft = 2;      // PWM control for left drive
 const int pinPwmDriveRight = 3;     // PWM control for right drive
 const int pinPwmDumpLeft = 4;       // PWM control for left dump
 const int pinPwmDumpRight = 5;      // PWM control for right dump
-const int pwmValueDumpLeft = 128;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle) //TODO zistit
-const int pwmValueDumpRight = 128;  // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle)
+const int pwmValueDumpLeft = 165;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle) //TODO zistit
+const int pwmValueDumpRight = 165;  // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle)
 
 //pins for NRF24L01
 const int pinCE = 19;
 const int pinCSN = 10;
 RF24 radio(pinCE, pinCSN);  // Adjust pin numbers for CE, CSN to match your Teensy setup
 const byte addresses[][6] = { "1Node", "2Node" };
+
+int dumpLeftCounter = 0;
+int dumpRightCounter = 0;
+
+int previousDumpLeft = 1;
+int previousDumoRight = 1;
 
 
 void setup() {
@@ -197,11 +203,21 @@ void loop() {
     Serial.print("  ");
     Serial.println(isTimerRightDumpTriggered);
 
-    if (dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
+    // if(!dataToReceive.leftDump)
+    // dumpLeftCounter++;
+    // else
+    // dumpLeftCounter = 0;
+
+    // if(!dataToReceive.rightDump)
+    // dumpRightCounter++;
+    // else
+    // dumpRightCounter = 0;
+
+    if (!dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
       triggerFunctionsNonBlockingLeftDump();
     }
 
-    if (dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
+    if (!dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
       triggerFunctionsNonBlockingRightDump();
     }
 
