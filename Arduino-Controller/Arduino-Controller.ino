@@ -30,6 +30,8 @@
 #define DISPLAY_MAIN_SCREEN_OUTLINE_COLOR ST77XX_WHITE
 #define DISPLAY_SONAR_DATA_COLOR ST77XX_BLUE
 
+int connectioncounter = 0;
+
 /// Battery icon colors
 #define DISPLAY_BATTERY_BODY_COLOR ST77XX_WHITE
 #define DISPLAY_BATTERY_BORDER_COLOR ST77XX_BLACK
@@ -195,7 +197,7 @@ void loop() {
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
     dataToSend.rightDump = digitalRead(pinDumpRight);
-    //Serial.println(dataToSend.yAxis);
+    //Serial.println(dataToSend.rightDump);
 
     radio.stopListening();                         // Ensure we're not in listening mode
     radio.write(&dataToSend, sizeof(dataToSend));  // Send data
@@ -213,6 +215,7 @@ void loop() {
     if (radio.available()) {
       radio.read(&dataReceived, sizeof(dataReceived));
       radioAvailable = true;
+      connectioncounter = 0;
       awaitingData = false;       // Reset flag after receiving data
       isSending = true;           // Switch back to sending mode
       lastSwitchTime = millis();  // Update the switch time
@@ -286,14 +289,20 @@ void loop() {
 
       //TODO: Not connected to the boat
       if (!isSending) {
+        if(connectioncounter > 100){
         radioAvailable = false;
+        
+        }
+        else
+        connectioncounter++;
       }
     }
   }
 
   digitalWrite(TFT_CS, LOW);
   SPI.beginTransaction(settingsDevice2);
-  //delay(100);
+  delay(10);
+ // Serial.println(radioAvailable);
   updateDisplay(radioAvailable, displayState);
   digitalWrite(TFT_CS, HIGH);
   SPI.endTransaction();
@@ -899,7 +908,7 @@ void updateDisplay(bool connected, struct DisplayState *state) {
         updateMainScreenSonarValues();
       }
 
-    } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_NOT_ENOUGH_SATELLITES) {
+     } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_NOT_ENOUGH_SATELLITES) {
       state->currentScreen = ERROR_NOT_ENOUGH_SATELLITES;
       updateTopBarBackground();
       drawErrorScreen(ERROR_NOT_ENOUGH_SATELLITES);
