@@ -1,805 +1,816 @@
 #include <SPI.h>
 #include <nRF24L01.h>
 #include <RF24.h>
+#include <TinyGPS++.h>
+#include <math.h>
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
+// 16/3/2024
 
-#define TFT_CS        10
-#define TFT_RST        8
-#define TFT_DC         9
+#define deadZone 20
+#define speedZone 20
 
-#define DISPLAY_BUTTON_MENU 4
-#define DISPLAY_BUTTON_SELECT 3
-#define DISPLAY_BUTTON_CONFIRM 2
-#define DISPLAY_BUTTON_HOME 5
+#define slowSpeed 200  // PWM
+#define fastSpeed 255
 
-#define DISPLAY_WIDTH 320
-#define DISPLAY_HEIGHT 240
+double desiredLat = 0;
+double desiredLon = 0;
 
-#define DISPLAY_BUTTON_WIDTH  180
-#define DISPLAY_BUTTON_HEIGHT 30
-#define DISPLAY_TOP_BAR_COLOR ST77XX_BLACK
-#define DISPLAY_MENU_BAR_COLOR ST77XX_BLACK
-#define DISPLAY_MENU_BAR_BUTTON_COLOR ST77XX_WHITE
-#define DISPLAY_MAIN_SCREEN_COLOR ST77XX_BLACK
-#define DISPLAY_MAIN_SCREEN_OUTLINE_COLOR ST77XX_WHITE
-#define DISPLAY_SONAR_DATA_COLOR ST77XX_BLUE
+typedef struct {
+  int x;
+  int y;
+} MiddlePoint;
 
-/// Battery colors
-#define DISPLAY_BATTERY_BODY_COLOR ST77XX_WHITE
-#define DISPLAY_BATTERY_BORDER_COLOR ST77XX_BLACK
+typedef struct {
+  bool autonomous;
+  uint32_t distance;
+  uint32_t heading;
+  double lastDesiredLat;
+  double lastDesiredLon;
+} Automat;
 
-#define DISPLAY_MAIN_SCREEN_WIDTH_MARGIN 80
+typedef enum {
+  N,
+  NW,
+  NE,
+  E,
+  W,
+  SW,
+  SE,
+  S,
+  None
+} Direction;  //svetove strany
 
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-enum DisplayScreens {
-    NONE = 0,
-    ERROR_SCREEN = -1,
-    GPS_SCREEN = 1,
-    SONAR_SCREEN = 2
-};
-
-struct DisplayGpsSelectionData {
-  uint8_t position;
-  uint8_t nextPos;
-  uint16_t rectX;
-  uint16_t rectY;
-};
-
-struct DisplayState {
-  DisplayScreens currentScreen;
-  bool menuButtonPressed;
-  bool selectButtonPressed;
-  bool confirmButtonPressed;
-  bool homeButtonPressed;
-};
-
-struct DisplayGpsSelectionData *currentGpsSelection;
-struct DisplayState *displayState;
-
-// Circular buffer to hold lake floor data
-uint16_t displayLakeFloorBuffer[DISPLAY_WIDTH - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN];
-uint16_t displaySonarDrawIndex;
-
+#pragma pack(push, 1)
 struct commandData {
   int16_t xAxis;
   int16_t yAxis;
   int16_t leftDump;
   int16_t rightDump;
-  double gpsGoToPosLat;
-  double gpsGoToPosLon; //Ak su 0 tak nechod ak sa zmenia tak chod
-  bool returnHome; //return Home if needed
+  uint16_t gpsGoToPosLat1;
+  uint16_t gpsGoToPosLat2;
+  uint16_t gpsGoToPosLon1;  //Ak su 0 tak nechod ak sa zmenia tak chod
+  uint16_t gpsGoToPosLon2;
+  bool returnHome;       //return Home if needed
 };
+#pragma pack(pop)
 
-struct SensorData{
-  int16_t sonarDistance;
-  int16_t sonarFIshFoundNum;
-  double actualGpsPositionLon;
-  double actualGpsPositionLat;
+#pragma pack(push, 1)
+struct SensorData {
+  uint16_t sonarDistance;
+  uint8_t sonarFIshFoundNum;
+  uint16_t actualGpsPositionLon1;
+  uint16_t actualGpsPositionLon2;
+  uint16_t actualGpsPositionLat1;
+  uint16_t actualGpsPositionLat2;
+  uint8_t NumOfSats;
+  bool coldStart;
+  uint8_t batteryTeensy;
 };
+#pragma pack(pop)
 
-const int pinDriveYAxis = A0;
-const int pinDriveXAxis = A1;
-const int pinDumpLeft = A2; //normally 7
-const int pinDumpRight = A3; //normally 8
+SensorData dataToSend;
+commandData dataToReceive;
 
-bool firstInitTime = false;
+// battery
+const int batteryPin = A16;
 
 
-bool SPICOM = true;
-bool isSending = true; // Start in sending mode
-unsigned long lastSwitchTime = 0; // Last time we switched mode
-const unsigned long sendingDuration = 1000; // Send data for 1 second
-bool awaitingData = false; // Flag to indicate awaiting reception of one data packet
+//GPS
+void getGPSPoint();
+void gpsLoop();
+double getNewestLat();
+double getNewestLng();
+void calculateGPSDistance();
+double haversine(double lat1, double lon1, double lat2, double lon2);
+
+//static const uint8_t GPS_RXpin = 4;
+//static const uint8_t GPS_TXpin = 3;
+static const long GPSbaud = 9600;
+
+uint8_t gps_dataAvailable = 0;
+uint8_t gps_hasCorrectData = 0;
+
+double gps_point_lat_lon_array[4][2];
+uint32_t gps_satelite_number = 0;
+uint8_t gps_point_counter = 0; 
+double gps_heading_degrees = 0.0;
+double fullDistanceTraveled = 0;
+
+TinyGPSPlus gps;
+//SoftwareSerial Serial7(GPS_RXpin, GPS_TXpin);
+
+unsigned long gps_previousMillis = 0UL;
+unsigned long gps_interval = 1000UL;
+
+unsigned long gps_previousMillis2 = 0UL;
+
+//GPS END
+
+
+////Senzor utrazvuk
+#define ECHOPIN 17
+#define TRIGPIN 18
+
+unsigned long previousMillisSonar = 0;
+const long intervalSonar = 100;
+int previousDistance = -1;
+unsigned long fishTimestamps[100];
+int fishCount = 0;
+
+unsigned long triggerTime = 0;
+volatile unsigned long echoStartTime = 0;
+volatile unsigned long echoEndTime = 0;
+volatile bool echoReceived = false;
+
+
+
+
+
+unsigned long previousMillisLeft = 0;   // Stores last time the functions were triggered
+const long intervalLeft = 600;         // Interval at which to run the second function (milliseconds)
+unsigned long previousMillisRight = 0;  // Stores last time the functions were triggered
+const long intervalRight = 600;        // Interval at which to run the second function (milliseconds)
+bool isTimerLeftDumpTriggered = false;
+bool isTimerRightDumpTriggered = false;
+
+// Pin setup for driving and dumping
+const int pinDriveLeftDirection1 = 6;
+const int pinDriveLeftDirection2 = 7;
+const int pinDriveRightDirection1 = 8;
+const int pinDriveRightDirection2 = 27;
+const int pinDumpLeftDirection1 = 23;
+const int pinDumpLeftDirection2 = 22;
+const int pinDumpRightDirection1 = 21;
+const int pinDumpRightDirection2 = 20;
+const int pinPwmDriveLeft = 2;      // PWM control for left drive
+const int pinPwmDriveRight = 3;     // PWM control for right drive
+const int pinPwmDumpLeft = 4;       // PWM control for left dump
+const int pinPwmDumpRight = 5;      // PWM control for right dump
+const int pwmValueDumpLeft = 165;   // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle) //TODO zistit
+const int pwmValueDumpRight = 165;  // Set a PWM value between 0 (0% duty cycle) and 255 (100% duty cycle)
 
 //pins for NRF24L01
-const int pinCE = 6; // 9 normally
-const int pinCSN = 7; //10 normally
-
-RF24 radio(pinCE, pinCSN); // CE, CSN pins configuration
-const byte addresses[][6] = {"1Node", "2Node"};
-
-
-SPISettings settingsDevice1(4000000, MSBFIRST, SPI_MODE0); // Example settings for device 1
-SPISettings settingsDevice2(2000000, MSBFIRST, SPI_MODE1); // Example settings for device 2
+const int pinCE = 19;
+const int pinCSN = 10;
+RF24 radio(pinCE, pinCSN);  // Adjust pin numbers for CE, CSN to match your Teensy setup
+const byte addresses[][6] = { "1Node", "2Node" };
 
 void setup() {
   Serial.begin(9600);
   radio.begin();
-  radio.setDataRate(RF24_250KBPS);
+  radio.openWritingPipe(addresses[1]);
+  radio.openReadingPipe(1, addresses[0]);
   radio.setPALevel(RF24_PA_MIN);
-  radio.openWritingPipe(addresses[0]);
-  radio.openReadingPipe(1, addresses[1]);
-  radio.startListening(); // Start in listening mode to be ready to switch to sending mode
-  Serial.println("Arduino is ready");
+  radio.setDataRate(RF24_250KBPS);
+  radio.startListening();
 
-  pinMode(pinDumpLeft, INPUT);
-  pinMode(pinDumpRight, INPUT);
-  pinMode(pinCSN, OUTPUT);
-  pinMode(TFT_CS, OUTPUT);
+  // Initialize motor and dump control pins
+  pinMode(pinDriveLeftDirection1, OUTPUT);
+  pinMode(pinDriveLeftDirection2, OUTPUT);
+  pinMode(pinDriveRightDirection1, OUTPUT);
+  pinMode(pinDriveRightDirection2, OUTPUT);
+  pinMode(pinDumpLeftDirection1, OUTPUT);
+  pinMode(pinDumpLeftDirection2, OUTPUT);
+  pinMode(pinDumpRightDirection1, OUTPUT);
+  pinMode(pinDumpRightDirection2, OUTPUT);
+  pinMode(pinPwmDriveLeft, OUTPUT);
+  pinMode(pinPwmDriveRight, OUTPUT);
+  pinMode(pinPwmDumpLeft, OUTPUT);
+  pinMode(pinPwmDumpRight, OUTPUT);
 
+  //Battery
+ // pinMode(A17, INPUT);
 
-  initDisplay(GPS_SCREEN);
+  //Ultrazvuk
+  pinMode(ECHOPIN, INPUT_PULLUP);
+  pinMode(TRIGPIN, OUTPUT);
+  digitalWrite(ECHOPIN, HIGH);
+  memset(fishTimestamps, 0, sizeof(fishTimestamps));
 
-  
+  //GPS
+  Serial7.begin(9600);  // Initialize Serial6 at 9600 baud
 }
 
 void loop() {
+  //sendDataToArduino();
+  if (radio.available()) {
+    radio.read(&dataToReceive, sizeof(commandData));
+    Serial.print(dataToReceive.yAxis);
+    Serial.print("  ");
+    Serial.print(dataToReceive.xAxis);
+    Serial.print("  ");
+    Serial.print(isTimerLeftDumpTriggered);
+    Serial.print("  ");
+    Serial.println(isTimerRightDumpTriggered);
 
-  if(!firstInitTime){
-    lastSwitchTime = millis();
-    firstInitTime = true;
-  }
-  
-
-
-
-
-  digitalWrite(pinCSN, LOW);
-  //digitalWrite(TFT_CS, LOW);
-  SPICOM = true;
-  //SPI.beginTransaction(settingsDevice1);
-
-  unsigned long currentTime = millis();
-
-  if (isSending && currentTime - lastSwitchTime > sendingDuration) {
-    // After sending for 1 second, switch to listening mode
-    isSending = false;
-    awaitingData = true;
-    radio.startListening();
-    //digitalWrite(pinCSN, LOW);
-    lastSwitchTime = currentTime; // Update the switch time
-    Serial.println("Switching to listening mode...");
-  }
-
-  if (isSending) {
-    // Create some data to send
-    commandData dataToSend;
-    dataToSend.yAxis = analogRead(pinDriveYAxis);
-    dataToSend.xAxis = analogRead(pinDriveXAxis);
-    dataToSend.leftDump = digitalRead(pinDumpLeft);
-    dataToSend.rightDump = digitalRead(pinDumpRight);
-    Serial.println(dataToSend.yAxis);
-    radio.stopListening(); // Ensure we're not in listening mode
-    radio.write(&dataToSend, sizeof(dataToSend)); // Send data
-
-    digitalWrite(pinCSN, HIGH);
-  SPI.endTransaction();
-  
-
-  //delay(20);
-  digitalWrite(TFT_CS, LOW);
-SPI.beginTransaction(settingsDevice2);
-//delay(100);
-  
-  
-  SPICOM = true;
-  bool connected = true; // hodnotu by som bral z nejakej get funkcie
-  updateDisplay(connected, displayState);
-digitalWrite(TFT_CS, HIGH);
-  SPI.endTransaction();
-    //Serial.println("Sending data...");
-   // delay(10); // Small delay to avoid spamming too fast
-  }
-
-  // Listen for one piece of data and switch back to sending
-  if (!isSending && awaitingData) {
-    
-    if (radio.available()) {
-      SensorData dataReceived;
-      radio.read(&dataReceived, sizeof(dataReceived));
-      awaitingData = false; // Reset flag after receiving data
-      isSending = true; // Switch back to sending mode
-      lastSwitchTime = millis(); // Update the switch time
-      Serial.println(dataReceived.sonarDistance);
+    if (!dataToReceive.leftDump || isTimerLeftDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Left to dump
+      triggerFunctionsNonBlockingLeftDump();
     }
-    
 
+    if (!dataToReceive.rightDump || isTimerRightDumpTriggered) {  // TODO If lost connection while dumping This makes Dump Motor Right to dump
+      triggerFunctionsNonBlockingRightDump();
+    }
+
+    desiredLat = concatenateDigitsString(dataToReceive.gpsGoToPosLat1, dataToReceive.gpsGoToPosLat2);
+    desiredLon = concatenateDigitsString(dataToReceive.gpsGoToPosLon1, dataToReceive.gpsGoToPosLon2);
+    desiredLat = desiredLat / 10000000;
+    desiredLon = desiredLon / 10000000;
+    if(desiredLat != Automat.lastDesiredLat || desiredLon != Automat.lastDesiredLon) {
+      Automat.autonomous = true;
+    }
+
+    if(Automat.autonomous) {
+      goToSpecificCoord(desiredLat, desiredLon, getNewestLat, getNewestLng, gps_heading_degrees);
+    }
     else{
-      //TODO Not connected to the boat
-    }
-  }
-
-  //delay(100);
-
-
-}
-
-
-
-void drawFishFinder(float sonarData, int lineThickness) {
-    const float maxDistance = 600.0;  // Maximum distance (adjust based on your sonar)
-    const uint8_t SCROLL_AMOUNT = 6;
-    const uint8_t LAKE_FLOOR_HEIGHT = 20;
-    const uint8_t TOP_BAR_MARGIN = 40;
-
-    // Map sonar data to lake floor Y coordinate within the drawing area
-    uint16_t lakeFloorY = map(sonarData, 0, maxDistance, tft.height() - 2, TOP_BAR_MARGIN);
-
-    // Update the lake floor buffer at the current draw index
-    displayLakeFloorBuffer[displaySonarDrawIndex] = lakeFloorY;
-
-    // Calculate the height of the line from SCREEN_HEIGHT to lakeFloorY
-    int lineHeight = tft.height() - 1 - lakeFloorY;
-
-    // Draw vertical line with specified line thickness from SCREEN_HEIGHT to lakeFloorY at the current draw index
-    for (int i = 0; i < lineThickness; i++) {
-        tft.drawFastVLine(displaySonarDrawIndex + i, lakeFloorY, lineHeight, DISPLAY_SONAR_DATA_COLOR);
+      drive(dataToReceive.xAxis, dataToReceive.yAxis);
     }
 
-    // Increment draw index
-    displaySonarDrawIndex += SCROLL_AMOUNT;
-
-    // Check if draw index has reached or exceeded the screen width
-    if (displaySonarDrawIndex >= tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN) {
-        // Reset draw index to start drawing from the beginning of the screen
-        displaySonarDrawIndex = 0;
-
-        uint16_t rectX = 0;
-        uint16_t rectY = 40;
-        uint16_t rectWidth = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-        uint16_t rectHeight = tft.height() - 40;
-        tft.fillRect(rectX, rectY, rectWidth, rectHeight, ST77XX_BLACK);
-    }
-}
-
-// Helper function to determine battery fill color based on charge level
-uint16_t getBatteryFillColor(uint8_t batteryCharge) {
-  if (batteryCharge >= 50) {
-    return ST77XX_GREEN;    
-  } else if (batteryCharge >= 25) {
-    return ST77XX_ORANGE;
-  } else if (batteryCharge >= 10) {
-    return ST77XX_RED;
-  } else {
-    return ST77XX_RED;
-  }
-}
-
-void drawBattery(uint16_t batteryWidth, uint16_t batteryHeight, uint16_t batteryMargin, uint16_t batteryX, uint16_t batteryY, uint8_t batteryCharge) {  
-  const uint16_t fillColor = getBatteryFillColor(batteryCharge);
-
-  /// Draw battery body
-  tft.fillRect(batteryX, batteryY, batteryWidth, batteryHeight, DISPLAY_BATTERY_BODY_COLOR);
-
-  /// Calculate fill width based on battery charge
-  uint16_t fillWidth = map(batteryCharge, 0, 100, 0, batteryWidth - 2 * batteryMargin);
-
-  /// Draw battery fill level with determined color
-  tft.fillRect(batteryX + batteryMargin, batteryY + batteryMargin, fillWidth, batteryHeight - 2 * batteryMargin, fillColor);
-
-  /// Draw battery border
-  tft.drawRect(batteryX, batteryY, batteryWidth, batteryHeight, DISPLAY_BATTERY_BORDER_COLOR);
-}
-
-void updateTopBarBackground() {
-  uint8_t rectX = 90;
-  uint8_t rectY = 0;
-  uint8_t rectWidth = 100;
-  uint8_t rectHeight = 15;
-  tft.fillRect(rectX, rectY, rectWidth, rectHeight, DISPLAY_TOP_BAR_COLOR);
-}
-
-void updateTopBar(bool connected, uint8_t numberOfSatellites, DisplayScreens currentScreen) {
-  /// Satellites
-  tft.setCursor(0, 2);
-  tft.setTextSize(1);
-
-  const uint8_t idealNumOfSatellites = 7;
-  const uint8_t usableNumOfSatellites = 5;
-
-  if (numberOfSatellites < usableNumOfSatellites) {
-    tft.setTextColor(ST77XX_MAGENTA); // bieda
-
-  } else if (numberOfSatellites < idealNumOfSatellites && numberOfSatellites >= usableNumOfSatellites) {
-    tft.setTextColor(ST77XX_ORANGE); // take da sa
-
-  } else {
-    tft.setTextColor(ST77XX_GREEN); // dobre
   }
 
-  tft.print("Satellites: ");
-  tft.print(numberOfSatellites);
-
-  /// Connection Status
-  tft.setCursor(72, 10);
-  if (connected) {
-    tft.setTextColor(ST77XX_GREEN);
-    tft.print("OK");
-  } else {
-    tft.setTextColor(ST77XX_MAGENTA);
-    tft.print("NO");
+  else {
+    //Serial.println("Radio Didnt Receive"); //TODO if radio didnt receive get time and if not for 15 sec then go to home.
   }
-
-  /// Draw battery icons
-  drawBattery(20, 8, 2, tft.width() - 24, 2, 40); // Boat Battery
-  drawBattery(20, 8, 2, tft.width() - 24, 10, 70); // Joystick Battery  
-
-  /// Current Screen
-  switch (currentScreen) {
-    case GPS_SCREEN:
-      tft.setCursor(100, 2);
-      tft.setTextSize(1);
-      tft.setTextColor(ST77XX_WHITE);
-      tft.print("GPS Menu");
-      break;
-
-    case SONAR_SCREEN:
-      tft.setCursor(100, 2);
-      tft.setTextSize(1);
-      tft.setTextColor(ST77XX_WHITE);
-      tft.print("SONAR Menu");
-      break;
-
-    default:
-      tft.setCursor(100, 2);
-      tft.setTextSize(1);
-      tft.setTextColor(ST77XX_WHITE);
-      tft.print("No screen selected");
-      break;
-  }
-}
-
-void drawTopBar() {
-  int rectX = 0;
-  int rectY = 0;
-  int rectWidth = tft.width();
-  int rectHeight = 20;
-  tft.fillRect(rectX, rectY, rectWidth, rectHeight, DISPLAY_TOP_BAR_COLOR);
-
-  /// Boat Battery
-  tft.setCursor(tft.width() - 56, 2);
-  tft.print("Boat: ");
-  tft.println();
   
-  /// Connection status
-  tft.print("Connection: ");
-
-  /// Joystick battery
-  tft.setCursor(tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN, 10);
-  tft.print("Joystick: "); 
-}
-
-void drawRightMenuBar() {
-  /// Menu bar
-  uint16_t rectX = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectY = 20;
-  uint16_t rectWidth = tft.width();
-  uint16_t rectHeight = tft.height();
-  tft.fillRect(rectX, rectY, rectWidth, rectHeight, DISPLAY_MENU_BAR_COLOR);
-  tft.drawRect(rectX, rectY, rectWidth, rectHeight, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-
-  /// Buttons with text
-  uint8_t buttonWidth  = 60;
-  uint8_t buttonHeight = 30;
-
-  /// Menu button
-  //tft.fillRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-  tft.drawRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("MENU");
-  rectY = rectY + 20 + buttonHeight;
-
-  //tft.fillRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-  tft.drawRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("SELECT");
-  rectY = rectY + 20 + buttonHeight;
-
-  //tft.fillRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-  tft.drawRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("CONFIRM");
-  rectY = rectY + 20 + buttonHeight;
-
-  //tft.fillRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-  tft.drawRect(rectX + 10, rectY + 20, buttonWidth, buttonHeight, DISPLAY_MENU_BAR_BUTTON_COLOR);
-
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("HOME");
-  tft.setCursor(rectX + 14, rectY + 24 + 8);
-  rectY = rectY + 20 + buttonHeight;  
-}
-
-void drawMainScreenBackground(uint16_t backgroundColor, DisplayScreens screen) {  
-  /// Main screen
-  uint16_t rectX = 0;
-  uint16_t rectY = 20;
-  uint16_t rectWidth = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectHeight = tft.height() - 20;
-
-  switch (screen) {
-    case SONAR_SCREEN:
-      tft.fillRect(rectX, rectY, rectWidth, rectHeight, backgroundColor);
-      tft.drawLine(rectX, rectY, rectWidth, rectY, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-      break;
-    case GPS_SCREEN:
-      tft.fillRect(rectX, rectY, rectWidth, rectHeight, backgroundColor);
-      tft.drawRect(rectX, rectY, rectWidth, rectHeight, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-      break;
-  }
-}
-
-void drawErrorScreen(uint8_t error) {
-  uint16_t rectX = 0;
-  uint16_t rectY = 0;
-  uint16_t rectWidth = tft.width();
-  uint16_t rectHeight = tft.height();
-  
-  /// Fill background
-  tft.fillRect(rectX, rectY, rectWidth, rectHeight, ST77XX_BLACK);
-  tft.drawRect(rectX, rectY, rectWidth, rectHeight, ST77XX_RED);
-
-  /// Draw inner rectangle
-  tft.fillRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_BLACK);
-  tft.drawRect(rectX + 20, rectY + 20, rectWidth - 40, rectHeight - 40, ST77XX_RED);
-
-  rectX = rectX + 20;
-  rectY = rectY + 20;
-
-  /// Display error message
-  tft.setTextColor(ST77XX_RED);
-  tft.setTextSize(3);
-
-  switch (error) {
-    case 1:
-      tft.setCursor(rectX + 90, rectY + 60);  
-      tft.print("ERROR!");
-      tft.setCursor(rectX + 16, rectY + 20 + 80);
-      tft.print("NO CONNECTION!");
-      break;
-    case 2:
-      tft.setCursor(rectX + 48, rectY + 60);  
-      tft.print("NOT ENOUGH");
-      tft.setCursor(rectX + 44, rectY + 20 + 80);
-      tft.print("SATELLITES!");
-      break;
-  }
-}
-
-void selectMainScreenGps(struct DisplayGpsSelectionData *selectionState) {
-  uint8_t rectX = selectionState->rectX;
-  uint8_t rectY = selectionState->rectY;
-
-  if (selectionState->position == 1)
-    tft.drawRect(rectX, rectY + 3*20 + 3*DISPLAY_BUTTON_HEIGHT, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-  else 
-    tft.drawRect(rectX, rectY - 20 - DISPLAY_BUTTON_HEIGHT, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);  
-
-  /// Highlight 
-  tft.drawRect(rectX, rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_YELLOW);
-
-  selectionState->rectX = rectX;
-  selectionState->rectY = rectY;
-}
-
-void updateMainScreenGpsValues() {
-  const int CURSOR_NEW_LINE = 10;
-
-  uint16_t rectX = 20;
-  uint16_t rectY = 20;
-  uint16_t rectWidth = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectHeight = tft.height();
    
-  tft.setTextSize(1); 
-  tft.setTextColor(ST77XX_WHITE);
+   //Sonar
+   processSonar();
+   // Sonar END
 
-  /// GPS Position 1
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
+  //GPS
+  processGps();
+//Fake data
+  // uint temp1 = round(48.5641198489998198156 *10000000);
+  // uint temp2 = round(17.6519512951981595195 *10000000);
 
-  tft.print("Lat: ");
-  float latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
+  //  dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
+  // //  dataToSend.actualGpsPositionLat1 = 2;
+  //  dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
+  // //  dataToSend.actualGpsPositionLat2 = 41189;
+  // dataToSend.actualGpsPositionLon1 = round(temp2 / 100000);
+  // dataToSend.actualGpsPositionLon2 = round(temp2 % 100000);
+  // Serial.print(dataToSend.actualGpsPositionLat1);
+  //  Serial.print(" ");
+  // Serial.print(dataToSend.actualGpsPositionLat2);
+  // Serial.print(" ");
+  //  Serial.print(dataToSend.actualGpsPositionLon1);
+  //  Serial.print(" ");
+  //  Serial.print(dataToSend.actualGpsPositionLon2);
+  //  Serial.print(" ");
+  //  Serial.println(dataToSend.NumOfSats);
 
-  tft.print(", Long: ");
-  float longitude = 73.562;
-  tft.print(longitude); // tuto by som bral hodnotu z nejakej get funkcie
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+  // uint32_t lattitude = 485641198;
+  // double rLat = lattitude;
+  // Serial.println(rLat);
 
-  /// GPS Position 2
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
+  // Serial.println(dataToSend.actualGpsPositionLat);
+  // Serial.println(dataToSend.actualGpsPositionLon);
+  //GPS ENd
 
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
+sendDataToArduino(); 
 
-  tft.print(", Long: ");
-  longitude = 73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 3
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);
-
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
-
-  tft.print(", Long: ");
-  longitude = -73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
-
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 4
-  tft.setCursor(rectX + 14, rectY + 24 + CURSOR_NEW_LINE);  
-
-  tft.print("Lat: ");
-  latitude = 40.780; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(latitude);
-
-  tft.print(", Long: ");
-  longitude = -73.562; // tuto by som bral hodnotu z nejakej get funkcie
-  tft.print(longitude);
-
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
+    delay(10);
 }
 
-void updateMainScreenSonarValues() {  
-  float sonarData = random(0, 600); // Random value between 0 and 600 (replace with real data) TODO: GETTER
+void triggerFunctionsNonBlockingLeftDump() {
+  unsigned long currentMillis = millis();
 
-  // Draw fish finder point based on sonar data
-  drawFishFinder(sonarData, 6);
-
-  uint16_t rectX = 20;
-  uint16_t rectY = 40;
-  uint16_t rectWidth = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectHeight = tft.height() - 20;
-
-  const uint8_t NUM_POINTS = 5;
-  const uint8_t POINT_VALUES[NUM_POINTS] = {25, 50, 75, 100, 0};  // Values to map
-  uint16_t lakeFloorY[NUM_POINTS];  // Array to store mapped Y coordinates
-
-  // Calculate mapped Y coordinates for each point
-  for (int i = 0; i < NUM_POINTS; i++) {
-      lakeFloorY[i] = map(POINT_VALUES[i], 0, 100, rectHeight, rectY);
+  if (!isTimerLeftDumpTriggered) {
+    previousMillisLeft = currentMillis;  // Save the time of the trigger
+    isTimerLeftDumpTriggered = true;
+    analogWrite(pinPwmDumpLeft, pwmValueDumpLeft);
+    digitalWrite(pinDumpLeftDirection1, 1);
+    digitalWrite(pinDumpLeftDirection2, 0);
   }
 
-  // Draw lines for each mapped Y coordinate
-  for (int i = 0; i < NUM_POINTS; i++) {
-      tft.drawLine(rectX - 5, lakeFloorY[i], rectX + 5, lakeFloorY[i], ST77XX_WHITE);
-  }
-
-  // Draw a vertical line on the left side of the display
-  tft.drawLine(rectX, rectY, rectX, rectHeight, ST77XX_WHITE);  
-
-  tft.setCursor(4, tft.height() - 10);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(1);
-
-  uint16_t height = 600; // In cm 
-  tft.print(height);
-  tft.print(" cm");
-
-  uint16_t numberOfFish = 12;
-  tft.setCursor(tft.width() - 120, 24);
-  tft.print("Fish: "); 
-  tft.setCursor(tft.width() - 120, 32);
-  tft.print(numberOfFish);
-}
-
-void drawMainScreenSonar() {
-  drawMainScreenBackground(ST77XX_BLACK, SONAR_SCREEN);
-}
-
-void drawMainScreenGps() {
-  drawMainScreenBackground(ST77XX_BLACK, GPS_SCREEN);
-  uint16_t rectX = 20;
-  uint16_t rectY = 20;
-  uint16_t rectWidth = tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN;
-  uint16_t rectHeight = tft.height();
-
-  /// GPS Position 1
-  tft.drawRect(rectX + 10, rectY + 20, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("GPS POSITION 1");
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 2
-  tft.drawRect(rectX + 10, rectY + 20, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("GPS POSITION 2");
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 3
-  tft.drawRect(rectX + 10, rectY + 20, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("GPS POSITION 3");
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-
-  /// GPS Position 4
-  tft.drawRect(rectX + 10, rectY + 20, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, DISPLAY_MAIN_SCREEN_OUTLINE_COLOR);
-  tft.setCursor(rectX + 14, rectY + 24);
-  tft.setTextSize(1); tft.setTextColor(ST77XX_WHITE);
-  tft.print("GPS POSITION 4");
-  rectY = rectY + 20 + DISPLAY_BUTTON_HEIGHT;
-}
-
-void handleMenuButton(struct DisplayState *state) {
-  uint8_t menuButtonState = digitalRead(DISPLAY_BUTTON_MENU);
-
-  if (menuButtonState == LOW && !state->menuButtonPressed) {
-
-    if (state->currentScreen == GPS_SCREEN) {
-      state->currentScreen = SONAR_SCREEN;
-      drawMainScreenSonar();
-
-    } else if (state->currentScreen == SONAR_SCREEN) {
-      state->currentScreen = GPS_SCREEN;
-      drawMainScreenGps();
-
-      currentGpsSelection->position = 1;      
-      currentGpsSelection->rectX = 30;
-      currentGpsSelection->rectY = 40;
-      selectMainScreenGps(currentGpsSelection);
-      currentGpsSelection->nextPos = 2;
-
-      displaySonarDrawIndex = 0;
-    }
-    state->menuButtonPressed = true;
-  } else if (menuButtonState == HIGH) {
-    state->menuButtonPressed = false;
+  if (isTimerLeftDumpTriggered && currentMillis - previousMillisLeft >= intervalLeft) {
+    isTimerLeftDumpTriggered = false;  // Reset the trigger flag
+    analogWrite(pinPwmDumpLeft, 0);
+    digitalWrite(pinDumpLeftDirection1, 0);
+    digitalWrite(pinDumpLeftDirection2, 0);
   }
 }
 
-void handleSelectionButton(struct DisplayState *state, struct DisplayGpsSelectionData *currentGpsSelection) {
-  uint8_t selectionButtonState = digitalRead(DISPLAY_BUTTON_SELECT);
+void triggerFunctionsNonBlockingRightDump() {
+  unsigned long currentMillis = millis();
 
-  if (selectionButtonState == LOW && state->currentScreen == GPS_SCREEN && !state->selectButtonPressed) {
-    switch (currentGpsSelection->nextPos) {
-      case 1:
-        currentGpsSelection->position = 1;
-        currentGpsSelection->rectX = 30;
-        currentGpsSelection->rectY = 40;
-        selectMainScreenGps(currentGpsSelection);
-        currentGpsSelection->nextPos += 1;
-        break;
-      case 2:
-      case 3:
-      case 4:
-        currentGpsSelection->position += 1;
-        currentGpsSelection->rectY += 20 + DISPLAY_BUTTON_HEIGHT;
-        selectMainScreenGps(currentGpsSelection);
-        currentGpsSelection->nextPos = (currentGpsSelection->nextPos % 4) + 1;
-        break;
-    }
-    state->selectButtonPressed = true;
-  } else if (selectionButtonState == HIGH) {
-    state->selectButtonPressed = false;
+  if (!isTimerRightDumpTriggered) {
+    previousMillisRight = currentMillis;  // Save the time of the trigger
+    isTimerRightDumpTriggered = true;
+    analogWrite(pinPwmDumpRight, pwmValueDumpRight);
+    digitalWrite(pinDumpRightDirection1, 1);
+    digitalWrite(pinDumpRightDirection2, 0);
+  }
+
+  if (isTimerRightDumpTriggered && currentMillis - previousMillisRight >= intervalRight) {
+    isTimerRightDumpTriggered = false;  // Reset the trigger flag
+    analogWrite(pinPwmDumpRight, 0);
+    digitalWrite(pinDumpRightDirection1, 0);
+    digitalWrite(pinDumpRightDirection2, 0);
   }
 }
+void sendDataToArduino() {
 
-void handleConfirmButton(struct DisplayState *state, struct DisplayGpsSelectionData *currentGpsSelection) {
-  uint8_t confirmButtonState = digitalRead(DISPLAY_BUTTON_CONFIRM);
-
-  if (confirmButtonState == LOW && state->currentScreen == GPS_SCREEN && !state->confirmButtonPressed) {
-    tft.drawRect(currentGpsSelection->rectX, currentGpsSelection->rectY, DISPLAY_BUTTON_WIDTH, DISPLAY_BUTTON_HEIGHT, ST77XX_GREEN);
-    Serial.print("Chosen position: ");
-    Serial.println(currentGpsSelection->position);
-    state->confirmButtonPressed = true;
-  } else if (confirmButtonState == HIGH) {
-    state->confirmButtonPressed = false;
+  radio.stopListening();
+  dataToSend.sonarDistance = previousDistance;  // Prepare your data //TODO sonar, prejdena vzdialenost, gps data
+  dataToSend.sonarFIshFoundNum = fishCount;
+  dataToSend.batteryTeensy = map(((analogRead(batteryPin) * (3.3/1024)) * (1000+3000)/1000),11.1,12.6,0,100);
+  // int sss = 2;
+  // dataToSend.actualGpsPositionLat1 = previousDistance;
+  // dataToSend.actualGpsPositionLat = 
+  // dataToSend.actualGpsPositionLon = 
+  //Serial.println("Sending");
+  while (radio.write(&dataToSend, sizeof(SensorData))) {
+    //Serial.println("Sending 1");
+    //Keep sending until you acnowledge
+    //TODO after 15 sec return home
   }
+
+  radio.startListening();
 }
 
-void handleHomeButton(struct DisplayState *state) {
-  uint8_t homeButtonState = digitalRead(DISPLAY_BUTTON_HOME);
-
-  if (homeButtonState == LOW && !state->homeButtonPressed) {
-    Serial.println("Going home!");
-    state->homeButtonPressed = true;
-  } else if (homeButtonState == HIGH) {
-    state->homeButtonPressed = false;
-  }
-}
-
-void updateDisplay(bool connected, struct DisplayState *state) {
-  DisplayScreens screen = state->currentScreen;
-
-  handleMenuButton(state);
-  handleSelectionButton(state, currentGpsSelection);
-  handleConfirmButton(state, currentGpsSelection);
-  handleHomeButton(state);  
-
-  uint8_t numberOfSatellites = 4; // TODO: GETTER
-
-  /// Update values ================
-  if (connected && numberOfSatellites > 3) {
-
-    if (screen != state->currentScreen)
-      updateTopBarBackground();
-
-    updateTopBar(connected, numberOfSatellites, state->currentScreen);
-    
-    if (state->currentScreen == GPS_SCREEN) {
-      updateMainScreenGpsValues();
-    } else if (state->currentScreen == SONAR_SCREEN) {
-      updateMainScreenSonarValues();      
-    }
-
-  } else if (!connected && state->currentScreen != ERROR_SCREEN) {
-    state->currentScreen = ERROR_SCREEN;
-    drawErrorScreen(1);
-  } else if (numberOfSatellites < 4 && state->currentScreen != ERROR_SCREEN) {
-    state->currentScreen = ERROR_SCREEN;
-    drawErrorScreen(2);
-  }
-}
-
-void initDisplay(DisplayScreens defaultScreen) {
-  /// Init Pins
-  pinMode(DISPLAY_BUTTON_MENU, INPUT_PULLUP);
-  pinMode(DISPLAY_BUTTON_SELECT, INPUT_PULLUP);
-  pinMode(DISPLAY_BUTTON_CONFIRM, INPUT_PULLUP);
-  pinMode(DISPLAY_BUTTON_HOME, INPUT_PULLUP);  
-  
-  /// Init display
-  tft.init(240, 320);
-  tft.setRotation(1); /// To ensure that 0, 0 is in the top left corner...
-  tft.invertDisplay(false); /// for some reason the default of the display is to be inverted...
-  tft.fillScreen(ST77XX_BLACK);
-
-  drawTopBar();
-  drawRightMenuBar();
-
-  /// Init structs
-  displayState = new DisplayState;
-  if (displayState == nullptr) {
-      // Memory allocation failed
-      // Handle error
-  } else {
-      // Memory allocation successful
-      displayState->currentScreen = NONE;
-      displayState->menuButtonPressed = false;
-      displayState->selectButtonPressed = false;
-      displayState->confirmButtonPressed = false;
-      displayState->homeButtonPressed = false;
-  }
-
-  currentGpsSelection = new DisplayGpsSelectionData;
-  if (currentGpsSelection == nullptr) {
-      // Memory allocation failed
-      // Handle error
-  } else {
-      // Memory allocation successful
-      currentGpsSelection->position = 1;
-      currentGpsSelection->nextPos = 2;
-      currentGpsSelection->rectX = 30;
-      currentGpsSelection->rectY = 40;
-  }  
-
-  /// Initialize lake floor buffer with default values (bottom of the screen)
-  for (int i = 0; i < tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN; i++) {
-    displayLakeFloorBuffer[i] = tft.height();
-  }
-
-  switch(defaultScreen) {
-    case GPS_SCREEN:
-      drawMainScreenGps();
-      displayState->currentScreen = GPS_SCREEN;
-      selectMainScreenGps(currentGpsSelection);
-      currentGpsSelection->nextPos = 2;
+///////////Drive Manual////////////////
+void drive(int xData, int yData) {
+  setMiddlePoint(500, 500);
+  Direction direction = setMovement(xData, yData);
+  //Serial.println(direction);
+  int speed = setSpeed(xData);
+  static int speedR;
+  static int speedL;
+  int motorPinAR = 1;
+  int motorPinBR = 0;
+  int motorPinAL = 1;
+  int motorPinBL = 0;
+  switch (direction) {
+    case N:
+      speedL = speed;
+      speedR = speed;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 1;
+      motorPinBL = 0;
       break;
+    case S:
+      speedL = speed;
+      speedR = speed;
+      motorPinAR = 0;
+      motorPinBR = 1;
+      motorPinAL = 0;
+      motorPinBL = 1;
 
-    case SONAR_SCREEN:
-      drawMainScreenSonar();
-      displayState->currentScreen = SONAR_SCREEN;
       break;
+    case E:
+      speedL = speed;
+      speedR = 0;
+      motorPinAR = 0;
+      motorPinBR = 1;
+      motorPinAL = 1;
+      motorPinBL = 0;
 
+      break;
+    case W:
+      speedL = 0;
+      speedR = speed;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
+
+      break;
+    case NW:
+      speedL = speed / 1.5;
+      speedR = speed;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
+      break;
+    case SW:
+      speedL = speed / 1.5;
+      speedR = speed;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
+      break;
+    case NE:
+      speedL = speed;
+      speedR = speed / 1.5;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
+      break;
+    case SE:
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
+      speedL = speed;
+      speedR = speed / 1.5;
+      break;
     default:
-      displayState->currentScreen = NONE;
+      speedL = 0;
+      speedR = 0;
+      motorPinAR = 1;
+      motorPinBR = 0;
+      motorPinAL = 0;
+      motorPinBL = 1;
       break;
   }
+  digitalWrite(pinDriveRightDirection1, motorPinAR);
+  digitalWrite(pinDriveRightDirection2, motorPinBR);
+  digitalWrite(pinDriveLeftDirection1, motorPinAL);
+  digitalWrite(pinDriveLeftDirection2, motorPinBL);
+  analogWrite(pinPwmDriveLeft, speedL);
+  analogWrite(pinPwmDriveRight, speedR);
+}
+
+MiddlePoint setMiddlePoint(int startMiddleX, int startMiddleY) {
+  MiddlePoint central;
+  central.x = startMiddleX;
+  central.y = startMiddleY;
+  // Serial.println(central.y);
+
+  return central;
+}
+
+Direction setMovement(int xData, int yData) {
+  MiddlePoint central = setMiddlePoint(0, 0);  //random cisla tie nuly
+
+  const int deadZoneLowX = 500 - deadZone;
+  const int deadZoneHighX = 500 + deadZone;
+
+  const int deadZoneLowY = 500 - deadZone;
+  const int deadZoneHighY = 500 + deadZone;
+
+  //Serial.println(central.y);
+  if (xData > deadZoneHighX && yData > deadZoneHighY)
+    return NE;
+
+  else if (xData < deadZoneLowX && yData > deadZoneHighY)
+    return NW;
+
+  else if (xData < deadZoneHighX && xData > deadZoneLowX && yData > deadZoneHighY)
+    return N;
+
+  else if (xData < deadZoneHighX && xData > deadZoneLowX && yData < deadZoneLowY)
+    return S;
+
+  else if (xData > deadZoneHighX && yData < deadZoneHighY && yData > deadZoneLowY)
+    return E;
+
+  else if (xData < deadZoneLowX && yData < deadZoneHighY && yData > deadZoneLowY)
+    return W;
+
+  else if (xData > deadZoneHighX && yData < deadZoneLowY)
+    return SE;
+
+  else if (xData < deadZoneLowX && yData < deadZoneLowY)
+    return SW;
+  else
+    return None;
+}
+
+int setSpeed(int joystick) {  //joystick - hodnota kt. budeme ziskavat z joysticku
+  if (joystick < speedZone)   //speedzone - hranica na kt. sa bude menit rychlost, treba odmerat
+    return slowSpeed;
+  else
+    return fastSpeed;
+}
+////////////Drive Manuel END ////////////////////
+
+////////////Sonar//////////////////
+void processSonar() {
+  unsigned long currentMillis = millis();
+  updateFishCount(currentMillis);
+
+  if (currentMillis - previousMillisSonar >= intervalSonar) {
+    previousMillisSonar = currentMillis;
+    int duration = measureDistance();
+    //int duration = 20;
+    int distance = duration / 58;  //air
+    // int distance = duration / 250;  //water
+    // Serial.print("Distance: ");
+    // Serial.print(distance);
+    // Serial.print(" cm  ");
+    // Serial.print("Fish Count: ");
+    //   Serial.println(fishCount);
+  
+
+    if (previousDistance != -1 && previousDistance - distance > previousDistance * 0.3) {
+      recordFish(currentMillis);
+      // Serial.print("Fish Count: ");
+      // Serial.println(fishCount);
+    }
+    previousDistance = distance;
+  }
+}
+
+void recordFish(unsigned long timestamp) {
+  for (int i = 0; i < 100; i++) {
+    if (fishTimestamps[i] == 0) {
+      fishTimestamps[i] = timestamp;
+      fishCount++;
+      break;
+    }
+  }
+}
+
+void updateFishCount(unsigned long currentMillis) {
+  for (int i = 0; i < 100; i++) {
+    if (fishTimestamps[i] != 0 && (currentMillis - fishTimestamps[i] >= 10000)) {
+      fishTimestamps[i] = 0;
+      if (fishCount > 0) fishCount--;
+    }
+  }
+}
+
+int measureDistance() {
+  digitalWrite(TRIGPIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIGPIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIGPIN, LOW);
+  return pulseIn(ECHOPIN, HIGH);
+  //return 20;
+}
+
+int measureDistanceNonBlocking() {
+  if (!echoReceived) {
+    if (triggerTime == 0) {
+      // Trigger the pulse
+      digitalWrite(TRIGPIN, LOW);
+      delayMicroseconds(2);
+      digitalWrite(TRIGPIN, HIGH);
+      delayMicroseconds(10);
+      digitalWrite(TRIGPIN, LOW);
+      triggerTime = micros();
+    } else if (micros() - triggerTime > 20000) { // 20ms timeout
+      triggerTime = 0; // Reset for the next trigger
+      return -1; // Timeout
+    }
+  } else {
+    // Calculate pulse duration
+    unsigned long duration = echoEndTime - echoStartTime;
+    echoReceived = false; // Reset for the next measurement
+    triggerTime = 0; // Reset for the next trigger
+    return duration;
+  }
+  return -1; // Measurement not complete yet
+}
+
+void echoISR() {
+  if (digitalRead(ECHOPIN) == HIGH) {
+    echoStartTime = micros();
+  } else {
+    echoEndTime = micros();
+    echoReceived = true;
+  }
+}
+
+/////////////Sonar End//////////////
+
+
+/////////////////GPS////////////////
+void processGps() {
+  //Serial.println("HELLO");
+  while (Serial7.available() > 0) {
+   // Serial.println("GPS AVAILABLE");
+    char c = Serial7.read();
+    //Serial.print(c);
+    if(gps.encode(c)){
+      if(gps.location.isValid()){
+        unsigned long currentMillis = millis();
+
+        if(currentMillis - gps_previousMillis > gps_interval){
+          if(gps_point_counter < 4){
+            getGPSPoint();
+            if(gps_dataAvailable == 1){
+              calculateGPSDistanceAndHeading();
+            }
+          }
+          gps_previousMillis = currentMillis;
+        }
+        
+        if(gps_point_counter >= 4){
+          gps_point_counter--;
+          for(uint8_t i = 0; i < gps_point_counter; i++){
+            gps_point_lat_lon_array[i][0] = gps_point_lat_lon_array[i+1][0];
+            gps_point_lat_lon_array[i][1] = gps_point_lat_lon_array[i+1][1];
+          }
+        }
+
+        currentMillis = millis();
+        if(currentMillis - gps_previousMillis2 > 5000 && gps_hasCorrectData){
+          Serial.println("We here");
+          dataToSend.actualGpsPositionLat1 = 0;
+          dataToSend.actualGpsPositionLon1 = 0;
+          dataToSend.actualGpsPositionLat2 = 0;
+          dataToSend.actualGpsPositionLon2 = 0;
+          dataToSend.NumOfSats = 0;
+          gps_hasCorrectData = 0;
+      }
+    }
+  }
+  }
+  // if(!Serial7.available()){
+  //   Serial.println("GPS UNAVAILABLE");
+  //   gps_dataAvailable = 0;
+  // }
+
+  if(gps_hasCorrectData){
+    Serial.println();
+    Serial.print("Coordinates = ");
+    double temp = getNewestLat();
+    Serial.print(temp,10);
+    Serial.print(", ");
+    //dataToSend.actualGpsPositionLat = temp;
+    temp = getNewestLng();
+    Serial.print(temp,10);
+    Serial.print(", ");
+    //dataToSend.actualGpsPositionLon = temp;
+    dataToSend.NumOfSats = gps_satelite_number;
+    Serial.print(", ");
+    Serial.println(gps_satelite_number);
+
+    uint temp1 = round(getNewestLat() * 10000000);
+    uint temp2 = round(getNewestLng() *10000000);
+    dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
+    dataToSend.actualGpsPositionLat2 = round(temp1 % 100000);
+    dataToSend.actualGpsPositionLon1 = round(temp2 / 100000);
+    dataToSend.actualGpsPositionLon2 = round(temp2 % 100000);
+    //gps_dataAvailable = 0;
+  }
+}
+
+double getNewestLat(){
+  if(gps_point_counter < 1 || gps_point_counter > 4){
+    return -1.0;
+  }
+  return gps_point_lat_lon_array[gps_point_counter][0];
+}
+
+double getNewestLng(){
+  if(gps_point_counter < 1 || gps_point_counter > 4){
+    return -1.0;
+  }
+  return gps_point_lat_lon_array[gps_point_counter][1];
+}
+
+double haversine(double lat1, double lon1, double lat2, double lon2) {
+    const double rEarth2 = 6372795.0;
+    const double rEarth = 6371000.0;
+    double x = pow( sin( ((lat2 - lat1)*M_PI/180.0) / 2.0), 2.0 );
+    double y = cos(lat1*M_PI/180.0) * cos(lat2*M_PI/180.0);
+    double z = pow( sin( ((lon2 - lon1)*M_PI/180.0) / 2.0), 2.0 );
+    double a = x + y * z;
+    double c = 2.0 * atan2(sqrt(a), sqrt(1.0-a));
+    double d = rEarth2 * c;
+    return d;
+}
+
+void getGPSPoint(){
+  if(gps_point_counter < 4){
+    if (gps.location.isValid() && gps.location.isUpdated()) {
+      if(gps_point_counter > 1){
+        unsigned long currentMillis = millis();
+        gps_dataAvailable = 1;
+        gps_hasCorrectData = 1;
+        gps_previousMillis2 = currentMillis;
+      }
+      else
+        gps_dataAvailable = 0;
+
+      Serial.print("1");
+      Serial.print(",");
+      
+      gps_satelite_number = gps.satellites.value();
+      Serial.print(gps_satelite_number);
+      Serial.print(",");
+
+      gps_point_lat_lon_array[gps_point_counter][0] = gps.location.lat();
+      gps_point_lat_lon_array[gps_point_counter][1] = gps.location.lng();
+
+      Serial.print(gps_point_lat_lon_array[gps_point_counter][0],10);
+      Serial.print(",");
+
+      Serial.print(gps_point_lat_lon_array[gps_point_counter][1],10);
+      Serial.print(",");
+      gps_point_counter++;
+    }
+    else{
+      gps_dataAvailable = 0;
+    }
+  }
+}
+
+void calculateGPSDistanceAndHeading(){
+  double distance = haversine(gps_point_lat_lon_array[gps_point_counter-2][0] , gps_point_lat_lon_array[gps_point_counter-2][1], 
+                             gps_point_lat_lon_array[gps_point_counter-1][0], gps_point_lat_lon_array[gps_point_counter-1][1]);
+  if(distance > 2.0){
+    distance = 0.0;
+  }
+  if(distance != 0.0){
+    fullDistanceTraveled += distance;
+  }
+
+  gps_heading_degrees = gps.courseTo(gps_point_lat_lon_array[gps_point_counter-2][0] , gps_point_lat_lon_array[gps_point_counter-2][1], 
+                              gps_point_lat_lon_array[gps_point_counter-1][0], gps_point_lat_lon_array[gps_point_counter-1][1]);
+  // Serial.print(distance,5);
+  // Serial.print(",");
+  // Serial.print(fullDistanceTraveled,5);
+  // Serial.print(",");
+  // Serial.println(gps_heading_degrees);
+}
+////////////////GPS END////////////
+
+uint32_t concatenateDigitsString(uint32_t digit1, uint32_t digit2) {
+  // Convert digits to strings
+  String str1 = String(digit1);
+  String str2 = String(digit2);
+
+  // Serial.println(str1);
+  // Serial.println(str2);
+
+  // Concatenate the strings
+  String concatenatedStr = str1 + str2;
+  // Serial.println(concatenatedStr);
+
+  // Convert the concatenated string back to an integer
+  uint32_t concatenatedInt = concatenatedStr.toInt();
+  return concatenatedInt;
+}
+
+void motors(double distance, double angle) {
+  double integral_distance = 0.0;
+  double integral_angle = 0.0;
+  double pwm_right = 0.0;
+  double pwm_left = 0.0;
+
+  const double Kp_distance = 2.0; 
+  const double Ki_distance = 0.1; 
+  const double Kp_angle = 1.0;    
+  const double Ki_angle = 0.05;   
+  const double dt = 0.1;          
+
+  if (distance <= 1.5) {
+    pwm_left = 0;
+    pwm_right = 0;
+    integral_distance = 0;
+    integral_angle = 0;
+    Automat.autonomous = false;
+  return;
+  }
+
+  if (angle > 180) 
+  angle -= 360;
+
+  else if (angle < -180) 
+  angle += 360;
+
+
+  integral_distance += distance * dt;
+  integral_angle += angle * dt;
+
+  double P_distance = Kp_distance * distance + Ki_distance * integral_distance;
+  double P_angle = Kp_angle * angle + Ki_angle * integral_angle;
+
+  int base_pwm = (int)(P_distance * 25);
+  if (base_pwm > 255)
+    base_pwm = 255;
+
+  int diff_pwm = (int)(P_angle * 2);
+
+  pwm_left = base_pwm + diff_pwm;
+  pwm_right = base_pwm - diff_pwm;
+
+  if(pwm_left > 255) 
+    pwm_left = 255;
+
+  else if (pwm_left < 0) 
+    pwm_left = 0;
+
+
+  if (pwm_right > 255) 
+    pwm_right = 255;
+
+  else if (pwm_right < 0) 
+    pwm_right = 0;
+  if(pwm_right>150)
+    digitalWrite(pinDriveRightDirection1, motorPinAR);
+  if(pwm_left>150)
+    digitalWrite(pinDriveLeftDirection1, motorPinAL);
+  analogWrite(pinPwmDriveLeft, pwm_left);
+  analogWrite(pinPwmDriveRight, pwm_right);
+}
+
+void goToSpecificCoord(uint32_t finalCoorLA, uint32_t finalCoorLO, uint32_t currentCoorLA,uint32_t currentCoorLO, uint16_t GPSheading){
+  Automat.lastDesiredLat = finalCoorLA;
+  Automat.lastDesiredLon = finalCoorLO;
+  Automat.distance = haversine(finalCoorLA,finalCoorRA,finalCoorLO,finalCoorRO);
+  if (GPSheading != 0)
+      Automat.heading = GPSheading;
+  motors(Automat.distance, Automat.heading);
 }
