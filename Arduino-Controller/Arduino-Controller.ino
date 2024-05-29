@@ -90,6 +90,8 @@ unsigned long display_topBarPreviousMillis = 0;
 bool displayUpdateSonar = false;
 bool displayUpdateTopBar = false;
 
+double previousMilisReturnHome = 0;
+
 /// Nfrc and i/o data
 #pragma pack(push, 1)
 struct commandData {
@@ -200,6 +202,13 @@ void loop() {
     dataToSend.xAxis = analogRead(pinDriveXAxis);
     dataToSend.leftDump = digitalRead(pinDumpLeft);
     dataToSend.rightDump = digitalRead(pinDumpRight);
+
+    if(dataToSend.returnHome){
+      if(milis() - previousMilisReturnHome > 3000){
+        dataToSend.returnHome = false;
+      }
+      
+    }
     //Serial.println(dataToSend.rightDump);
 
     radio.stopListening();                         // Ensure we're not in listening mode
@@ -864,6 +873,8 @@ void handleHomeButton(struct DisplayState *state) {
 
   if (homeButtonState == LOW && !state->homeButtonPressed) {
     Serial.println("Going home!");
+    dataToSend.returnHome = true;
+    previousMilisReturnHome = milis();
     state->homeButtonPressed = true;
   } else if (homeButtonState == HIGH) {
     state->homeButtonPressed = false;
