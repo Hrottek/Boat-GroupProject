@@ -40,6 +40,8 @@ typedef enum {
   None
 } Direction;  //svetove strany
 
+bool returningHome;
+
 
 #pragma pack(push, 1)
 struct commandData {
@@ -106,6 +108,8 @@ unsigned long gps_interval = 1000UL;
 
 unsigned long gps_previousMillis2 = 0UL;
 
+double homeLat = 0;
+double homeLon = 0;
 //GPS END
 
 
@@ -217,13 +221,26 @@ Serial.println(desiredLon,10);
       triggerFunctionsNonBlockingRightDump();
     }
 
+    
+
+
     desiredLat = concatenateDigitsString(dataToReceive.gpsGoToPosLat1, dataToReceive.gpsGoToPosLat2);
     desiredLon = concatenateDigitsString(dataToReceive.gpsGoToPosLon1, dataToReceive.gpsGoToPosLon2);
     desiredLat = desiredLat / 10000000;
     desiredLon = desiredLon / 10000000;
+  
+
+
+    if(dataToReceive.returnHome || returningHome){
+      desiredLat = homeLat;
+      desiredLon = homeLon;
+    } 
+
     if(desiredLat != automat.lastDesiredLat || desiredLon != automat.lastDesiredLon) {
       Serial.println("we here");
       automat.autonomous = true;
+      if(dataToReceive.returnHome)
+      returningHome = true;
     }
 
     if(automat.autonomous) {
@@ -643,6 +660,11 @@ void processGps() {
     // Serial.print(", ");
     // Serial.println(gps_satelite_number);
 
+    if(homeLat == 0) {
+        homeLat = getNewestLat();
+        homeLon = getNewestLng();
+    }
+
     uint temp1 = round(getNewestLat() * 10000000);
     uint temp2 = round(getNewestLng() * 10000000);
     dataToSend.actualGpsPositionLat1 = round(temp1 / 100000);
@@ -774,6 +796,7 @@ void motors(double distance, double angle) {
     integral_distance = 0;
     integral_angle = 0;
     automat.autonomous = false;
+    returningHome = false;
   return;
   }
 
