@@ -872,12 +872,12 @@ void updateDisplay(bool connected, struct DisplayState *state) {
   /// Update values ================
   if (connected) {
 
-    if (state->currentScreen == ERROR_NO_RADIO_CONNECTION || state->currentScreen == ERROR_NOT_ENOUGH_SATELLITES) {
+    if (state->currentScreen == ERROR_NO_RADIO_CONNECTION) {
       tft.fillScreen(ST77XX_BLACK);
       drawTopBar();
       drawMenuBarWithButtons();
       setGpsScreenAsCurrentScreen(state);
-    }
+    } 
 
     if (screen != state->currentScreen)
       updateTopBarBackground();
@@ -885,6 +885,13 @@ void updateDisplay(bool connected, struct DisplayState *state) {
     updateTopBar(connected, numberOfSatellites, state->currentScreen);
 
     if (numberOfSatellites > 3) {
+
+      if (state->currentScreen == ERROR_NOT_ENOUGH_SATELLITES) {
+        tft.fillScreen(ST77XX_BLACK);
+        drawTopBar();
+        drawMenuBarWithButtons();
+        setGpsScreenAsCurrentScreen(state);
+      }
 
       if (state->currentScreen == GPS_SCREEN) {
         updateMainScreenGpsValues();
