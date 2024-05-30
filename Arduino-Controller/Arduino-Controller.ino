@@ -433,7 +433,7 @@ void updateTopBar(bool connected, uint8_t numberOfSatellites, DisplayScreens cur
 
     /// Draw battery icons
     drawBattery(20, 8, 2, tft.width() - 24, 2, dataReceived.batteryTeensy);  // Boat Battery
-    drawBattery(20, 8, 2, tft.width() - 24, 10, 70);                         // Joystick Battery
+    drawBattery(20, 8, 2, tft.width() - 24, 10, 70);                         // Controller Battery
 
     /// Current Screen
     switch (currentScreen) {
@@ -481,7 +481,7 @@ void drawTopBar() {
 
   /// Joystick battery
   tft.setCursor(tft.width() - DISPLAY_MAIN_SCREEN_WIDTH_MARGIN, 10);
-  tft.print("Joystick: ");
+  tft.print("Controller: ");
 }
 
 void drawMenuBarWithButtons() {
