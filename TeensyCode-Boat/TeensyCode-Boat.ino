@@ -490,7 +490,7 @@ void processSonar() {
     int duration = measureDistance();
     //int duration = 20;
     int distance = duration / 58;  //air
-    // int distance = duration / 250;  //water
+    // int distance = duration / 13.5;  //water
     // Serial.print("Distance: ");
     // Serial.print(distance);
     // Serial.print(" cm  ");
